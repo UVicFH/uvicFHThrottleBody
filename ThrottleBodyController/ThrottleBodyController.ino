@@ -12,21 +12,21 @@ July 2016
 
 uint8_t canIntRecv = 0;
 uint8_t instThrottleRequest = 0;
-uint8_t thermistorTemp_degC = 0;
+
 
 uint16_t motorPosQuad_deg = 0;
-uint16_t filteredCurrentDraw_mA = 0;
-uint16_t voltageInput_mV = 0;
+uint16_t filteredCurrentDraw_mA = 0;									//done
+uint16_t filteredVoltage_mV = 0;
+uint8_t filteredTemp_degCx2 = 0;
 
-float throttlePosHall_deg = 0;
+float throttlePosHall_deg = 0;											//done
 float filteredThrottleRequest = 0;
 
 void setup()
 {
-	MCP_CAN CAN(SPI_CAN_CS);                                          // set CS CAN pin
-	SPI.setDataMode (SPI_MODE_1);
+	MCP_CAN CAN(SPI_CAN_CS);											//set CS CAN pin
 	Serial.begin(115200);
-	Timer1.initialize(2000);  // 200 us = 5000 Hz
+	Timer1.initialize(200);  // 200 us = 5000 Hz
 
 	//output = 1, input = 0
 	DDRB |= 0b00000001; //PB0 is output (PB1 is PWM set up seperately) 
@@ -86,21 +86,29 @@ void calculateCurrent(void)
 {
 	uint16_t currentDraw_mA = analogRead(CURRENT_SENS)* math required to make work;
 
-	filteredCurrentDraw_mA *= CURRENT_FILTER_SIZE;
-	filteredCurrentDraw_mA = filteredCurrentDraw_mA - (filteredCurrentDraw_mA >> CURRENT_FILTER_SHIFT) + currentDraw_mA;
-	filteredCurrentDraw_mA = filteredCurrentDraw_mA >> CURRENT_FILTER_SHIFT;
+	filteredCurrentDraw_mA *= ADC_FILTER_SIZE;
+	filteredCurrentDraw_mA = filteredCurrentDraw_mA - (filteredCurrentDraw_mA >> filterShiftSize(ADC_FILTER_SIZE)) + currentDraw_mA;
+	filteredCurrentDraw_mA = filteredCurrentDraw_mA >> filterShiftSize(ADC_FILTER_SIZE);
 }
 
 //calculates the voltage input to the device, accounting for voltage drop due to current through the FET and shunt
 void calculateVoltage(void)
 {
+	uint16_t voltage_mV = analogRead(VOLTAGE_SENS)* math required to make work;
 
+	filteredVoltage_mV *= ADC_FILTER_SIZE;
+	filteredVoltage_mV = filteredVoltage_mV - (filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE)) + voltage_mV;
+	filteredCVoltage_mV = filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE);
 }
 
 //calculates the temperature recorded by the thermistor
 void calculateTemperature(void)
 {
+	uint16_t temp_degC = analogRead(VOLTAGE_SENS)* math required to make work;
 
+	filteredTemp_degCx2 *= ADC_FILTER_SIZE;
+	filteredTemp_degCx2 = filteredTemp_degCx2 - (filteredTemp_degCx2 >> filterShiftSize(ADC_FILTER_SIZE)) + temp_degC;
+	filteredTemp_degCx2 = filteredTemp_degCx2 >> filterShiftSize(ADC_FILTER_SIZE);
 }
 
 uint8_t filterShiftSize(uint8_t filterSize)
@@ -154,13 +162,6 @@ void adcMovingSum(uint8_t adcPin, uint16_t *pAdcSum, uint8_t filterSize)
 void floatMovingSum(float *pFloatSum, uint8_t filterSize)
 {
 
-}
-
-//gets the position of the low speed shaft from the hall sensor IC
-void getHallPosition(void)
-{
-
-	receivedval16 = SPI.transfer(val16);
 }
 
 uint16_t as5048aNOP(uint8_t inTransaction)
@@ -296,6 +297,19 @@ void zeroHallPosition(void)
 			Serial.println("Hall Zero Angle Low Write Successful")
 		}
 	}
+}
+
+//gets the position of the low speed shaft from the hall sensor IC
+void getHallPosition(void)
+{
+	uint16_t hallPositionSum_nominal = 0;
+
+	for(int i=0; i<HALL_FILTER_SIZE; i++)
+	{
+		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
+	}
+
+	throttlePosHall_deg = (hallPositionSum_nominal/HALL_FILTER_SIZE) / (16384/360); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
 }
 
 //calculates the position of the motor shaft from the quad encoder

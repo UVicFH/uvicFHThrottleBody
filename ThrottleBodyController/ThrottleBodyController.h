@@ -30,8 +30,9 @@ July 2016
 #define VOLTAGE_SENS 6
 
 #define ADC_FILTER_SIZE 4
+#define HALL_FILTER_SIZE 5
 
-#define HALL_GET_ANGLE 0x3FFF											// 0x3FFF command + 0b11000000,00000000 read and parity
+#define HALL_GET_ANGLE 0x3FFF
 #define HALL_ZERO_ANGLE_HIGH 0x0016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
