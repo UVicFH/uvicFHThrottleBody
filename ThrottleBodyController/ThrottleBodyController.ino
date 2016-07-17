@@ -163,28 +163,95 @@ void getHallPosition(void)
 	receivedval16 = SPI.transfer(val16);
 }
 
+uint16_t as5048aSetParity(uint16_t command)
+{
+	uint16_t command = command;
+	uint8_t parityBit = 0;
+
+	for(int i = 0; i<=14; i++)
+	{
+		parityBit = (command>>(14-i)) ^= parityBit;
+	}
+	return (command | (parityBit << 15));					//OR operator sets the single bit
+}
+
+uint16_t as5048aRemoveParity(uint16_t command)
+{
+	return (command & 0b0011111111111111);					//AND operator clears first two bits
+}
+
+uint16_t as5048aReadCommand(uint16_t spiSendCommand)
+{
+	uint16_t retVal = 0;
+
+	spiSendCommand |= 0b0100000000000000; 					//OR operator sets the read/write bit to READ
+	spiSendCommand = as5048aSetParity(spiSendCommand);
+
+	SPI.beginTransaction(SPI_SETTINGS_HALL);
+	SPI_HALL_SELECT();
+	retVal = SPI.transfer16(spiSendCommand);
+	SPI_HALL_UNSELECT();
+	SPI.endTransaction();
+	return retVal;
+}
+
+uint16_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
+{
+	uint16_t retVal = 0;
+
+	spiSendAddress &= 0b1011111111111111;					//AND operator sets the read/write bit to WRITE
+	spiSendAddress = as5048aSetParity(address);
+
+	spiSendCommand &= 0b1011111111111111;					//AND operator sets the read/write bit to WRITE
+	spiSendCommand = as5048aSetParity(spiSendCommand);
+
+	SPI.beginTransaction(SPI_SETTINGS_HALL);
+	SPI_HALL_SELECT();
+	retVal = SPI.transfer16(spiSendAddress);				//send the address to the sensor
+	SPI_HALL_UNSELECT();
+
+	SPI_HALL_SELECT();
+	retVal = SPI.transfer16(spiSendCommand);				//send the commanded value to the sensor
+	SPI_HALL_UNSELECT();
+
+
+
+
+
+	SPI.endTransaction();
+
+}
+
+uint16_t as5048aNOP(void)
+{
+	uint16_t retVal
+	uint16_t nopCommand = 0;
+
+	SPI.beginTransaction(SPI_SETTINGS_HALL);
+	SPI_HALL_SELECT();
+	retVal = SPI.transfer16(nopCommand);
+	SPI_HALL_UNSELECT();
+	SPI.endTransaction();
+	return retVal;	
+}
+
 void zeroHallPosition(void)
 {
 	uint16_t hallDataReceived = 0;
 	uint16_t hallSendBuffer = 0;
-	uint18_t parityBit = 0;
 
 	//get position first
-	SPI.beginTransaction();			//SPI mode 1 for hall sensor
-	SPI_HALL_SELECT();
-	hallDataReceived = SPI.transfer16(GET_ANGLE);								//if no error, this value should just be the position itself.
-	SPI_HALL_UNSELECT();
+	as5048aReadCommand(HALL_GET_ANGLE);
+	hallDataReceived = as5048aRemoveParity(as5048aNOP());
+	as5048aWriteCommand
+
 
 	hallSendBuffer = hallDataReceived;
 	
 	//force R bit to its correct value, and set parity to 0 for later
 	hallSendBuffer = hallSendBuffer & 0b0011111111111111;
 	
-	//calculate parity bit
-	for(int i = 0; i<=14; i++)
-	{
-		parityBit = (hallSendBuffer>>(14-i)) ^= parityBit;
-	}
+
 
 	//set parity bit
 	hallSendBuffer = hallSendBuffer & ((parityBit << 15) + 0b0011111111111111);

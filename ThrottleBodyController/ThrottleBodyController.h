@@ -14,12 +14,12 @@ July 2016
 
 #define ADC_FILTER_SIZE 4
 
-#define GET_ANGLE 0xFFFF											// 0x3FFF command + 0b11000000,00000000 read and parity
-#define SEND_ANGLE
-#define ZERO_ANGLE
+#define HALL_GET_ANGLE 0xFFFF											// 0x3FFF command + 0b11000000,00000000 read and parity
+#define HALL_SEND_ANGLE
+#define HALL_ZERO_ANGLE
 
 #define SPI_HALL_SELECT()   digitalWrite(SPI_HALL_CS, LOW)
 #define SPI_HALL_UNSELECT() digitalWrite(SPI_HALL_CS, HIGH)
 
-SPISettings spiSettingsHall(1000000, MSBFIRST, SPI_MODE_1);
-SPISettings spiSettingsCan(1000000, MSBFIRST, SPI_MODE_0);
+#define SPI_SETTINGS_HALL SPISettings(1000000, MSBFIRST, SPI_MODE_1);
+#define SPI_SETTINGS_CAN SPISettings(1000000, MSBFIRST, SPI_MODE_0);
