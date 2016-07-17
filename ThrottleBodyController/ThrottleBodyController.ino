@@ -163,6 +163,28 @@ void getHallPosition(void)
 	receivedval16 = SPI.transfer(val16);
 }
 
+uint16_t as5048aNOP(uint8_t inTransaction)
+{
+	uint16_t returnVal
+	uint16_t nopCommand = 0;
+
+	if(inTransaction == 0)
+	{
+		SPI.beginTransaction(SPI_SETTINGS_HALL);
+	}
+
+	SPI_HALL_SELECT();
+	returnVal = SPI.transfer16(HALL_NOP_COMMAND);
+	SPI_HALL_UNSELECT();
+
+	if(inTransaction == 0)
+	{
+		SPI.endTransaction();		
+	}
+
+	return returnVal;	
+}
+
 uint16_t as5048aSetParity(uint16_t command)
 {
 	uint16_t command = command;
@@ -182,22 +204,22 @@ uint16_t as5048aRemoveParity(uint16_t command)
 
 uint16_t as5048aReadCommand(uint16_t spiSendCommand)
 {
-	uint16_t retVal = 0;
+	uint16_t returnVal = 0;
 
 	spiSendCommand |= 0b0100000000000000; 					//OR operator sets the read/write bit to READ
 	spiSendCommand = as5048aSetParity(spiSendCommand);
 
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
 	SPI_HALL_SELECT();
-	retVal = SPI.transfer16(spiSendCommand);
+	returnVal = SPI.transfer16(spiSendCommand);
 	SPI_HALL_UNSELECT();
 	SPI.endTransaction();
-	return retVal;
+	return returnVal;
 }
 
-uint16_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
+uint8_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
 {
-	uint16_t retVal = 0;
+	uint16_t returnVal = 0;
 
 	spiSendAddress &= 0b1011111111111111;					//AND operator sets the read/write bit to WRITE
 	spiSendAddress = as5048aSetParity(address);
@@ -206,33 +228,27 @@ uint16_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
 	spiSendCommand = as5048aSetParity(spiSendCommand);
 
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
+
 	SPI_HALL_SELECT();
-	retVal = SPI.transfer16(spiSendAddress);				//send the address to the sensor
+	returnVal = SPI.transfer16(spiSendAddress);				//send the address to the sensor
 	SPI_HALL_UNSELECT();
 
 	SPI_HALL_SELECT();
-	retVal = SPI.transfer16(spiSendCommand);				//send the commanded value to the sensor
+	returnVal = SPI.transfer16(spiSendCommand);				//send the commanded value to the sensor
 	SPI_HALL_UNSELECT();
 
-
-
-
+	returnVal = as5048aNOP(1);								//send NOP to get the value in the register
 
 	SPI.endTransaction();
 
-}
-
-uint16_t as5048aNOP(void)
-{
-	uint16_t retVal
-	uint16_t nopCommand = 0;
-
-	SPI.beginTransaction(SPI_SETTINGS_HALL);
-	SPI_HALL_SELECT();
-	retVal = SPI.transfer16(nopCommand);
-	SPI_HALL_UNSELECT();
-	SPI.endTransaction();
-	return retVal;	
+	if(as5048aRemoveParity(returnVal) == as5048aRemoveParity(spiSendCommand))
+	{
+		return 0;
+	}
+	else
+	{
+		return 1;
+	}
 }
 
 void zeroHallPosition(void)
@@ -242,7 +258,7 @@ void zeroHallPosition(void)
 
 	//get position first
 	as5048aReadCommand(HALL_GET_ANGLE);
-	hallDataReceived = as5048aRemoveParity(as5048aNOP());
+	hallDataReceived = as5048aRemoveParity(as5048aNOP(0));
 	as5048aWriteCommand
 
 

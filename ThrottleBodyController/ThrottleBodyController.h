@@ -17,6 +17,7 @@ July 2016
 #define HALL_GET_ANGLE 0xFFFF											// 0x3FFF command + 0b11000000,00000000 read and parity
 #define HALL_SEND_ANGLE
 #define HALL_ZERO_ANGLE
+#define HALL_NOP_COMMAND 0
 
 #define SPI_HALL_SELECT()   digitalWrite(SPI_HALL_CS, LOW)
 #define SPI_HALL_UNSELECT() digitalWrite(SPI_HALL_CS, HIGH)
