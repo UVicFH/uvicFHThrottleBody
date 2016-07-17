@@ -199,14 +199,16 @@ uint16_t as5048aSetParity(uint16_t command)
 
 uint16_t as5048aRemoveParity(uint16_t command)
 {
-	return (command & 0b0011111111111111);					//AND operator clears first two bits
+	command &= (~1<<15);									//AND operator clears parity bit
+	command &= (~1<<14);									//AND operator clears error bit
+	return (command);
 }
 
 uint16_t as5048aReadCommand(uint16_t spiSendCommand)
 {
 	uint16_t returnVal = 0;
 
-	spiSendCommand |= 0b0100000000000000; 					//OR operator sets the read/write bit to READ
+	spiSendCommand |= (1<<14); 					//OR operator sets the read/write bit to READ
 	spiSendCommand = as5048aSetParity(spiSendCommand);
 
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
@@ -221,11 +223,11 @@ uint8_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
 {
 	uint16_t returnVal = 0;
 
-	spiSendAddress &= 0b1011111111111111;					//AND operator sets the read/write bit to WRITE
-	spiSendAddress = as5048aSetParity(address);
+	spiSendAddress &= ~(1<<14);								//AND operator sets the read/write bit to WRITE
+	spiSendAddress = as5048aSetParity(spiSendAddress);		//sets parity required by as5048a
 
-	spiSendCommand &= 0b1011111111111111;					//AND operator sets the read/write bit to WRITE
-	spiSendCommand = as5048aSetParity(spiSendCommand);
+	spiSendCommand &= ~(1<<14);								//AND operator sets the read/write bit to WRITE
+	spiSendCommand = as5048aSetParity(spiSendCommand);		//sets parity required by as5048a
 
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
 
@@ -254,29 +256,46 @@ uint8_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
 void zeroHallPosition(void)
 {
 	uint16_t hallDataReceived = 0;
-	uint16_t hallSendBuffer = 0;
+	uint16_t upperZeroValue = 0;
+	uint16_t lowerZeroValue = 0;
+	uint8_t hallDataStatus = 0;
 
 	//get position first
 	as5048aReadCommand(HALL_GET_ANGLE);
 	hallDataReceived = as5048aRemoveParity(as5048aNOP(0));
-	as5048aWriteCommand
 
+	//separate the upper and lower bits of the zero data to be sent
+	//need to get into form of:
+	// 0b00000000xxxxxxxx   highest 8 bits of the 14 bit value
+	// 0b0000000000xxxxxx   lowest 6 bits of the 14 bit value
 
-	hallSendBuffer = hallDataReceived;
-	
-	//force R bit to its correct value, and set parity to 0 for later
-	hallSendBuffer = hallSendBuffer & 0b0011111111111111;
-	
+	highZeroValue = hallDataReceived >> 8
+	lowZeroValue = hallDataReceived & (BM0 | BM1 | BM2 | BM3 | BM4 | BM5);
 
-
-	//set parity bit
-	hallSendBuffer = hallSendBuffer & ((parityBit << 15) + 0b0011111111111111);
-
-	SPI_HALL_SELECT();
-	hallDataReceived = SPI.transfer16()
-
-	SPI.endTransaction();
-
+	hallDataStatus = as5048aWriteCommand(HALL_ZERO_ANGLE_HIGH, highZeroValue)
+	if(DEBUG)
+	{
+		if(hallDataSuccess==0)
+		{
+			Serial.println("Hall Zero Angle High Write Unsuccessful")	
+		}
+		else 
+		{
+			Serial.println("Hall Zero Angle High Write Successful")
+		}
+	}
+	hallDataStatus = as5048aWriteCommand(HALL_ZERO_ANGLE_LOW, lowZeroValue)
+	if(DEBUG)
+	{
+		if(hallDataSuccess==0)
+		{
+			Serial.println("Hall Zero Angle Low Write Unsuccessful")	
+		}
+		else 
+		{
+			Serial.println("Hall Zero Angle Low Write Successful")
+		}
+	}
 }
 
 //calculates the position of the motor shaft from the quad encoder
