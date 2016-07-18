@@ -16,8 +16,8 @@ uint8_t instThrottleRequest = 0;
 
 uint16_t motorPosQuad_deg = 0;
 uint16_t filteredCurrentDraw_mA = 0;									//done
-uint16_t filteredVoltage_mV = 0;
-uint8_t filteredTemp_degCx2 = 0;
+uint16_t filteredVoltage_mV = 0;										//done
+uint8_t filteredTemp_degCx2 = 0;										//done
 
 float throttlePosHall_deg = 0;											//done
 float filteredThrottleRequest = 0;
@@ -66,13 +66,12 @@ void getCanMsg(void)
         {
         	instThrottleRequest = canMsgData[0];
         }
-        #if(DEBUG)
+        if(DEBUG)
         {
         	Serial.print("CAN Throttle Request = ");
         	Serial.println(canMsgData[0]);
         }
-        #endif
-    }	
+    }
 }
 
 //sends the outgoing CAN message with updated variables
@@ -315,6 +314,12 @@ void getHallPosition(void)
 //calculates the position of the motor shaft from the quad encoder
 void calculateQuadPosition(void)
 {
+	// use polling, and direct port manipulation. poll every millis.
+	// if we're only polling every 1ms, and we're sitting on the edge of a signal, we might miss some of the transitions
+	// if we require a state to be constant for 3ms before accepting it, that could help deal with bounces. 
+	// if the state changes before 3ms we reset that timer and keep monitoring.
+
+
 
 }
 

@@ -37,8 +37,8 @@ July 2016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
 
-#define SPI_HALL_SELECT()   digitalWrite(SPI_HALL_CS, LOW)
-#define SPI_HALL_UNSELECT() digitalWrite(SPI_HALL_CS, HIGH)
+#define SPI_HALL_SELECT() PORTB &= ~(1<<SPI_HALL_CS)				//digitalWrite(SPI_HALL_CS, LOW)
+#define SPI_HALL_UNSELECT() PORTB |= (1<<SPI_HALL_CS) 			//digitalWrite(SPI_HALL_CS, HIGH)
 
 #define SPI_SETTINGS_HALL SPISettings(1000000, MSBFIRST, SPI_MODE_1);
 #define SPI_SETTINGS_CAN SPISettings(1000000, MSBFIRST, SPI_MODE_0);
