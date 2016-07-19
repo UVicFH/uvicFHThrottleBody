@@ -18,8 +18,9 @@ uint16_t motorPosQuad_deg = 0;
 uint16_t filteredCurrentDraw_mA = 0;									//done
 uint16_t filteredVoltage_mV = 0;										//done
 uint8_t filteredTemp_degCx2 = 0;										//done
+uint8_t filteredHallPosition_degx2 = 0;									//done
 
-float throttlePosHall_deg = 0;											//done
+float averagedHallPosition_deg = 0;										//done
 float filteredThrottleRequest = 0;
 
 void setup()
@@ -47,25 +48,25 @@ void setup()
 		}
 	}
 
+	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
+    CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
+    CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADRESS);							//filter 0 for receive buffer 0
+    CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADRESS);							//filter 1 for receive buffer 1
+
 	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
 }
 
 //gets the CAN message in the buffer, and reads the required values
 void getCanMsg(void)
 {
-	uint8_t canMsgAddress = 0;
 	uint8_t canMsgLength = 0;
 	uint8_t canMsgData[8];
 
 	while (CAN_MSGAVAIL == CAN.checkReceive()) 
     {
         // read data,  len: data length, buf: data buf
-        canMsgAddress = CAN.getCanId();
         CAN.readMsgBuf(&canMsgLength, buf);
-        if(canMsgAddress == 0x255)
-        {
-        	instThrottleRequest = canMsgData[0];
-        }
+        instThrottleRequest = canMsgData[0];
         if(DEBUG)
         {
         	Serial.print("CAN Throttle Request = ");
@@ -77,8 +78,27 @@ void getCanMsg(void)
 //sends the outgoing CAN message with updated variables
 void sendCanMsg(void)
 {
+	uint8_t canSendBuffer[8];
+	canSendBuffer[0] = filteredHallPosition_degx2;
+	canSendBuffer[1] = filteredCurrentDraw_mA >> 8;
+	canSendBuffer[2] = filteredCurrentDraw_mA;
+	canSendBuffer[3] = filteredVoltage_mV >> 8;
+	canSendBuffer[4] = filteredVoltage_mV;
+	canSendBuffer[5] = filteredTemp_degCx2;
+	
+	sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8, canSendBuffer);
 
 }
+
+void filterHallPosition(void)
+{
+	uint8_t hallPosition_degx2 = (int) averagedHallPosition_deg*2
+
+	filteredHallPosition_degx2 *= HALL_FILTER_SIZE;
+	filteredHallPosition_degx2 = filteredHallPosition_degx2 - (filteredHallPosition_degx2 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx2;
+	filteredHallPosition_degx2 = filteredHallPosition_degx2 >> filterShiftSize(HALL_FILTER_SIZE);
+}
+
 
 //calculates the current consumption of the device. oversample and average.
 void calculateCurrent(void)
@@ -156,11 +176,6 @@ void adcMovingSum(uint8_t adcPin, uint16_t *pAdcSum, uint8_t filterSize)
 {
 	uint16_t newAdcValue = analogRead(adcPin);
 	*pAdcAverage = *pAdcAverage - (*pAdcAverage >> filterShiftSize(filterSize)) + newAdcValue;
-}
-
-void floatMovingSum(float *pFloatSum, uint8_t filterSize)
-{
-
 }
 
 uint16_t as5048aNOP(uint8_t inTransaction)
@@ -303,12 +318,12 @@ void getHallPosition(void)
 {
 	uint16_t hallPositionSum_nominal = 0;
 
-	for(int i=0; i<HALL_FILTER_SIZE; i++)
+	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
 	{
 		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
 	}
 
-	throttlePosHall_deg = (hallPositionSum_nominal/HALL_FILTER_SIZE) / (16384/360); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
+	averagedHallPosition = (hallPositionSum_nominal/HALL_AVERAGE_SIZE) / (16384/360); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
 }
 
 //calculates the position of the motor shaft from the quad encoder
@@ -316,8 +331,9 @@ void calculateQuadPosition(void)
 {
 	// use polling, and direct port manipulation. poll every millis.
 	// if we're only polling every 1ms, and we're sitting on the edge of a signal, we might miss some of the transitions
-	// if we require a state to be constant for 3ms before accepting it, that could help deal with bounces. 
-	// if the state changes before 3ms we reset that timer and keep monitoring.
+	// if we require a state to be constant for 6-8ms before accepting it, that could help deal with bounces. 
+	// if the state changes before 6-8ms we reset that timer and keep monitoring.
+	// classic debounce of the signal.
 
 
 

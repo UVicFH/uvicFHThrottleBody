@@ -30,12 +30,16 @@ July 2016
 #define VOLTAGE_SENS 6
 
 #define ADC_FILTER_SIZE 4
-#define HALL_FILTER_SIZE 5
+#define HALL_AVERAGE_SIZE 5			//number of readings to take into account over 1ms. Makes reading more accurate.
+#define HALL_FILTER_SIZE 4			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
 
 #define HALL_GET_ANGLE 0x3FFF
 #define HALL_ZERO_ANGLE_HIGH 0x0016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
+
+#define CAN_THROTTLE_MSG_ADDRESS 0x102
+#define CAN_FEEDBACK_MSG_ADDRESS 0x103
 
 #define SPI_HALL_SELECT() PORTB &= ~(1<<SPI_HALL_CS)				//digitalWrite(SPI_HALL_CS, LOW)
 #define SPI_HALL_UNSELECT() PORTB |= (1<<SPI_HALL_CS) 			//digitalWrite(SPI_HALL_CS, HIGH)
