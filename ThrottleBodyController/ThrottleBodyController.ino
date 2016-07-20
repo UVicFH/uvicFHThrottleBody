@@ -11,17 +11,22 @@ July 2016
 #include <TimerOne.h>
 
 uint8_t canIntRecv = 0;
-uint8_t instThrottleRequest = 0;
 
+//received values from CAN
+uint16_t instThrottleRequest_degx10 = 0;
+uint8_t instThrottleBlip_deg = 0;
+uint8_t instThrottleBlip_ms = 0;
 
-uint16_t motorPosQuad_deg = 0;
+//values to be sent over CAN
 uint16_t filteredCurrentDraw_mA = 0;									//done
 uint16_t filteredVoltage_mV = 0;										//done
 uint8_t filteredTemp_degCx2 = 0;										//done
-uint8_t filteredHallPosition_degx2 = 0;									//done
+uint8_t filteredHallPosition_degx10 = 0;								//done
 
-float averagedHallPosition_deg = 0;										//done
-float filteredThrottleRequest = 0;
+//sensor feedback not sent over CAN
+float averagedHallPosition_deg = 0;	
+uint16_t motorPosQuad_deg = 0;											//done
+uint32_t hallZeroPosition = 0;
 
 void setup()
 {
@@ -54,6 +59,9 @@ void setup()
     CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADRESS);							//filter 1 for receive buffer 1
 
 	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
+
+	delay(200);
+	zeroHallPosition();
 }
 
 //gets the CAN message in the buffer, and reads the required values
@@ -65,12 +73,14 @@ void getCanMsg(void)
 	while (CAN_MSGAVAIL == CAN.checkReceive()) 
     {
         // read data,  len: data length, buf: data buf
-        CAN.readMsgBuf(&canMsgLength, buf);
-        instThrottleRequest = canMsgData[0];
+        CAN.readMsgBuf(&canMsgLength, canMsgData);
+        instThrottleRequest_degx10 = (canMsgData[1]<<8) + canMsgData[0];
+        instThrottleBlip_ms = canMsgData[2];
+        instThrottleBlip_deg = canMsgData[3];
         if(DEBUG)
         {
         	Serial.print("CAN Throttle Request = ");
-        	Serial.println(canMsgData[0]);
+        	Serial.println(instThrottleRequest_degx10);
         }
     }
 }
@@ -79,24 +89,24 @@ void getCanMsg(void)
 void sendCanMsg(void)
 {
 	uint8_t canSendBuffer[8];
-	canSendBuffer[0] = filteredHallPosition_degx2;
-	canSendBuffer[1] = filteredCurrentDraw_mA >> 8;
-	canSendBuffer[2] = filteredCurrentDraw_mA;
-	canSendBuffer[3] = filteredVoltage_mV >> 8;
-	canSendBuffer[4] = filteredVoltage_mV;
-	canSendBuffer[5] = filteredTemp_degCx2;
-	
-	sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8, canSendBuffer);
+	canSendBuffer[0] = filteredHallPosition_degx10 >> 8;
+	canSendBuffer[1] = filteredHallPosition_degx10;
+	canSendBuffer[2] = filteredCurrentDraw_mA >> 8;
+	canSendBuffer[3] = filteredCurrentDraw_mA;
+	canSendBuffer[4] = filteredVoltage_mV >> 8;
+	canSendBuffer[5] = filteredVoltage_mV;
+	canSendBuffer[6] = filteredTemp_degCx2;
 
+	sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8, canSendBuffer);
 }
 
 void filterHallPosition(void)
 {
-	uint8_t hallPosition_degx2 = (int) averagedHallPosition_deg*2
+	uint8_t hallPosition_degx10 = (int) averagedHallPosition_deg * 10; 
 
-	filteredHallPosition_degx2 *= HALL_FILTER_SIZE;
-	filteredHallPosition_degx2 = filteredHallPosition_degx2 - (filteredHallPosition_degx2 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx2;
-	filteredHallPosition_degx2 = filteredHallPosition_degx2 >> filterShiftSize(HALL_FILTER_SIZE);
+	filteredHallPosition_degx10 *= HALL_FILTER_SIZE;
+	filteredHallPosition_degx10 = filteredHallPosition_degx10 - (filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx10;
+	filteredHallPosition_degx10 = filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE);
 }
 
 
@@ -277,15 +287,27 @@ void zeroHallPosition(void)
 
 	//get position first
 	as5048aReadCommand(HALL_GET_ANGLE);
-	hallDataReceived = as5048aRemoveParity(as5048aNOP(0));
+
+	for(int i = 0; i<10; i++)
+	{
+		hallZeroPosition += as5048aReadCommand(HALL_GET_ANGLE);
+	}
+
+	hallZeroPosition = (uint32_t) (hallZeroPosition/10.0);
+	if(DEBUG)
+	{
+		Serial.println("Hall zero measurements complete.");
+		Serial.print("Hall sensor zero position is: ");
+		Serial.println(hallZeroPosition);
+	}
 
 	//separate the upper and lower bits of the zero data to be sent
 	//need to get into form of:
 	// 0b00000000xxxxxxxx   highest 8 bits of the 14 bit value
 	// 0b0000000000xxxxxx   lowest 6 bits of the 14 bit value
 
-	highZeroValue = hallDataReceived >> 8
-	lowZeroValue = hallDataReceived & (BM0 | BM1 | BM2 | BM3 | BM4 | BM5);
+	highZeroValue = (hallZeroPosition >> 8) & (BM7 | BM6 | BM5 | BM4 | BM3 | BM2 | BM1 | BM0);
+	lowZeroValue = hallZeroPosition & (BM5 | BM4 | BM3 | BM2 | BM1 | BM0);
 
 	hallDataStatus = as5048aWriteCommand(HALL_ZERO_ANGLE_HIGH, highZeroValue)
 	if(DEBUG)
@@ -359,7 +381,7 @@ void filterThrottle(void)
 
 void loop()
 {
-
+	
 }
 
 void MCP2515_ISR()
