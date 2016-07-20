@@ -11,6 +11,8 @@ July 2016
 #include <TimerOne.h>
 
 uint8_t canIntRecv = 0;
+uint32_t previousPidMillis = 0;
+uint32_t previousCanMillis = 0;
 
 //received values from CAN
 uint16_t instThrottleRequest_degx10 = 0;
@@ -133,7 +135,7 @@ void calculateVoltage(void)
 //calculates the temperature recorded by the thermistor
 void calculateTemperature(void)
 {
-	uint16_t temp_degC = analogRead(VOLTAGE_SENS)* math required to make work;
+	uint16_t temp_degC = analogRead(TEMP_SENS)* math required to make work;
 
 	filteredTemp_degCx2 *= ADC_FILTER_SIZE;
 	filteredTemp_degCx2 = filteredTemp_degCx2 - (filteredTemp_degCx2 >> filterShiftSize(ADC_FILTER_SIZE)) + temp_degC;
@@ -333,6 +335,7 @@ void zeroHallPosition(void)
 			Serial.println("Hall Zero Angle Low Write Successful")
 		}
 	}
+	as5048aReadCommand(HALL_GET_ANGLE);			//read angle one last time so the next request will give angle back.
 }
 
 //gets the position of the low speed shaft from the hall sensor IC
@@ -381,7 +384,25 @@ void filterThrottle(void)
 
 void loop()
 {
-	
+	if(canIntRecv ==1)
+	{
+		canIntRecv = 0;
+		getCanMsg();
+	}
+	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
+	{
+		previousPidMillis = millis();
+		getHallPosition();
+		executePid();
+	}
+	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
+	{
+		calculateCurrent();
+		calculateVoltage();
+		calculateTemperature();
+		filterHallPosition();
+		sendCanMsg();
+	}
 }
 
 void MCP2515_ISR()

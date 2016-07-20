@@ -28,10 +28,14 @@ July 2016
 #define SPI_HALL_CS 9
 #define CURRENT_SENS 5
 #define VOLTAGE_SENS 6
+#define TEMP_SENS 7
 
 #define ADC_FILTER_SIZE 4
 #define HALL_AVERAGE_SIZE 5			//number of readings to take into account over 1ms. Makes reading more accurate.
 #define HALL_FILTER_SIZE 4			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
+
+#define PID_EXECUTION_INTERVAL 1	//number of ms between changes in PID controller
+#define CAN_SEND_INTERVAL 10
 
 #define HALL_GET_ANGLE 0x3FFF
 #define HALL_ZERO_ANGLE_HIGH 0x0016
