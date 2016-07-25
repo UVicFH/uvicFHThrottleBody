@@ -26,14 +26,14 @@ July 2016
 #define BM14 (1<<14)
 #define BM15 (1<<15)
 
-#define SPI_CAN_CS 10
-#define SPI_HALL_CS 9
+#define SPI_CAN_CS 9
+#define SPI_HALL_CS 10
 #define CURRENT_SENS 5
 #define VOLTAGE_SENS 6
 #define TEMP_SENS 7
 
 #define ADC_FILTER_SIZE 4
-#define HALL_AVERAGE_SIZE 5			//number of readings to take into account over 1ms. Makes reading more accurate.
+#define HALL_AVERAGE_SIZE 1			//number of readings to take into account over 1ms. Makes reading more accurate.
 #define HALL_FILTER_SIZE 4			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
 
 #define PID_EXECUTION_INTERVAL 1	//number of ms between changes in PID controller
@@ -47,10 +47,10 @@ July 2016
 #define CAN_THROTTLE_MSG_ADDRESS 0x102
 #define CAN_FEEDBACK_MSG_ADDRESS 0x103
 
-#define SPI_HALL_SELECT() PORTB &= ~(1<<SPI_HALL_CS)				//digitalWrite(SPI_HALL_CS, LOW)
-#define SPI_HALL_UNSELECT() PORTB |= (1<<SPI_HALL_CS) 			//digitalWrite(SPI_HALL_CS, HIGH)
+#define SPI_HALL_SELECT() PORTB &= ~(0b00000100)				//digitalWrite(SPI_HALL_CS, LOW)
+#define SPI_HALL_UNSELECT() PORTB |= (0b00000100) 			//digitalWrite(SPI_HALL_CS, HIGH)
 
-#define SPI_SETTINGS_HALL SPISettings(1000000, MSBFIRST, SPI_MODE_1);
-#define SPI_SETTINGS_CAN SPISettings(1000000, MSBFIRST, SPI_MODE_0);
+SPISettings SPI_SETTINGS_HALL(1000000, MSBFIRST, SPI_MODE1);
+SPISettings SPI_SETTINGS_CAN(1000000, MSBFIRST, SPI_MODE0);
 
 #endif // THROTTLEBODYCONTROLLER_H

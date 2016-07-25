@@ -6,9 +6,8 @@ July 2016
 
 #include <SPI.h>
 #include "mcp_can.h"
-#include "ThrottleBodyController.h"
-#include "Pin_Defines.h"
-#include <TimerOne.h>
+#include "ThrottleBodyController.h"s
+//#include <TimerOne.h>
 
 uint8_t canIntRecv = 0;
 uint32_t previousPidMillis = 0;
@@ -23,7 +22,7 @@ uint8_t instThrottleBlip_ms = 0;
 uint16_t filteredCurrentDraw_mA = 0;									//done
 uint16_t filteredVoltage_mV = 0;										//done
 uint8_t filteredTemp_degCx2 = 0;										//done
-uint8_t filteredHallPosition_degx10 = 0;								//done
+uint16_t filteredHallPosition_degx10 = 0;								//done
 
 //sensor feedback not sent over CAN
 float averagedHallPosition_deg = 0;	
@@ -34,13 +33,14 @@ void setup()
 {
 	MCP_CAN CAN(SPI_CAN_CS);											//set CS CAN pin
 	Serial.begin(115200);
-	Timer1.initialize(200);  // 200 us = 5000 Hz
+  SPI.begin();
+//	Timer1.initialize(200);  // 200 us = 5000 Hz
 
 	//output = 1, input = 0
-	DDRB |= 0b00000001; //PB0 is output (PB1 is PWM set up seperately) 
-	DDRC |= 0b00111011; //PC0 PC1 PC3 PC4 & PC5 are outputs 
-	DDRD |= 0b11110100; //PD2 PD4 PD5 PD6 & PD7 are outputs
-  
+	DDRB |= 0b00000110; //PB1 and PB2 are outputs
+	DDRC |= 0b00000000; //no outputs on PC
+	DDRD |= 0b00110000; //PD4 PD5 are outputs    output = 1
+  /* commented for bringing up hall sensor  
 	while(1)
 	{
 		if(CAN_OK == CAN.begin(CAN_500KBPS))
@@ -55,6 +55,7 @@ void setup()
 		}
 	}
 
+
 	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
     CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
     CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADRESS);							//filter 0 for receive buffer 0
@@ -64,8 +65,10 @@ void setup()
 
 	delay(200);
 	zeroHallPosition();
+	*/
 }
 
+/*
 //gets the CAN message in the buffer, and reads the required values
 void getCanMsg(void)
 {
@@ -142,6 +145,7 @@ void calculateTemperature(void)
 	filteredTemp_degCx2 = filteredTemp_degCx2 >> filterShiftSize(ADC_FILTER_SIZE);
 }
 
+
 uint8_t filterShiftSize(uint8_t filterSize)
 {
 	uint8_t shiftSize = 0;
@@ -189,10 +193,10 @@ void adcMovingSum(uint8_t adcPin, uint16_t *pAdcSum, uint8_t filterSize)
 	uint16_t newAdcValue = analogRead(adcPin);
 	*pAdcAverage = *pAdcAverage - (*pAdcAverage >> filterShiftSize(filterSize)) + newAdcValue;
 }
-
+*/
 uint16_t as5048aNOP(uint8_t inTransaction)
 {
-	uint16_t returnVal
+	uint16_t returnVal;
 	uint16_t nopCommand = 0;
 
 	if(inTransaction == 0)
@@ -214,12 +218,11 @@ uint16_t as5048aNOP(uint8_t inTransaction)
 
 uint16_t as5048aSetParity(uint16_t command)
 {
-	uint16_t command = command;
 	uint8_t parityBit = 0;
 
 	for(int i = 0; i<=14; i++)
 	{
-		parityBit = (command>>(14-i)) ^= parityBit;
+		parityBit = (command>>(14-i)) ^ parityBit;
 	}
 	return (command | (parityBit << 15));					//OR operator sets the single bit
 }
@@ -235,8 +238,10 @@ uint16_t as5048aReadCommand(uint16_t spiSendCommand)
 {
 	uint16_t returnVal = 0;
 
-	spiSendCommand |= (1<<14); 					//OR operator sets the read/write bit to READ
-	spiSendCommand = as5048aSetParity(spiSendCommand);
+	//spiSendCommand |= (1<<14); 					//OR operator sets the read/write bit to READ
+	//spiSendCommand = as5048aSetParity(spiSendCommand);
+	Serial.print("spiSendCommand = ");
+	Serial.println(spiSendCommand);
 
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
 	SPI_HALL_SELECT();
@@ -246,6 +251,7 @@ uint16_t as5048aReadCommand(uint16_t spiSendCommand)
 	return returnVal;
 }
 
+/*
 uint8_t as5048aWriteCommand(uint16_t spiSendAddress, uint16_t spiSendCommand)
 {
 	uint16_t returnVal = 0;
@@ -337,7 +343,77 @@ void zeroHallPosition(void)
 	}
 	as5048aReadCommand(HALL_GET_ANGLE);			//read angle one last time so the next request will give angle back.
 }
+*/
+uint8_t spiCalcEvenParity(uint16_t value){
+	uint8_t cnt = 0;
+	uint8_t i;
 
+	for (i = 0; i < 16; i++)
+	{
+		if (value & 0x1)
+		{
+			cnt++;
+		}
+		value >>= 1;
+	}
+	return cnt & 0x1;
+}
+
+uint16_t readHallSensorAngle(void){
+	uint16_t command = 0b0100000000000000; // PAR=0 R/W=R
+	command = command | HALL_GET_ANGLE;
+
+	//Add a parity bit on the the MSB
+	command |= ((word)spiCalcEvenParity(command)<<15);
+
+	//Split the command into two bytes
+	uint8_t right_byte = command & 0xFF;
+	uint8_t left_byte = ( command >> 8 ) & 0xFF;
+
+
+	Serial.print("Read (0x");
+	Serial.print(HALL_GET_ANGLE, HEX);
+	Serial.print(") with command: 0b");
+	Serial.println(command, BIN);
+
+
+	//SPI - begin transaction
+	SPI.beginTransaction(SPI_SETTINGS_HALL);
+
+	//Send the command
+	digitalWrite(SPI_HALL_CS, LOW);
+	SPI.transfer(left_byte);
+	SPI.transfer(right_byte);
+	digitalWrite(SPI_HALL_CS,HIGH);
+
+	//Now read the response
+	digitalWrite(SPI_HALL_CS, LOW);
+	left_byte = SPI.transfer(0x00);
+	right_byte = SPI.transfer(0x00);
+	digitalWrite(SPI_HALL_CS, HIGH);
+
+	//SPI - end transaction
+	SPI.endTransaction();
+
+  uint16_t combinedValue = (left_byte<<8)|(right_byte);
+  
+
+	Serial.print("Read returned: ");
+	Serial.print(combinedValue);
+
+
+	//Check if the error bit is set
+	if (left_byte & 0x40) {
+		Serial.println("Setting Error bit");
+		//errorFlag = true;
+	}
+	else {
+		//errorFlag = false;
+	}
+
+	//Return the data, stripping the parity and error bits
+	return (( ( left_byte & 0xFF ) << 8 ) | ( right_byte & 0xFF )) & ~0xC000;
+}
 //gets the position of the low speed shaft from the hall sensor IC
 void getHallPosition(void)
 {
@@ -348,7 +424,10 @@ void getHallPosition(void)
 		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
 	}
 
-	averagedHallPosition = (hallPositionSum_nominal/HALL_AVERAGE_SIZE) / (16384/360); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
+	Serial.print("Hall position = ");
+	Serial.println(hallPositionSum_nominal);
+
+	averagedHallPosition_deg = (hallPositionSum_nominal/HALL_AVERAGE_SIZE) / (16384/360); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
 }
 
 //calculates the position of the motor shaft from the quad encoder
@@ -384,6 +463,7 @@ void filterThrottle(void)
 
 void loop()
 {
+	/*
 	if(canIntRecv ==1)
 	{
 		canIntRecv = 0;
@@ -403,6 +483,9 @@ void loop()
 		filterHallPosition();
 		sendCanMsg();
 	}
+	*/
+	readHallSensorAngle();
+	delay(500);
 }
 
 void MCP2515_ISR()
