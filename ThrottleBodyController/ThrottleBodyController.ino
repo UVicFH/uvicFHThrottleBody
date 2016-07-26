@@ -97,16 +97,15 @@ void sendCanMsg(void)
 	uint8_t canSendBuffer[8];
 	canSendBuffer[0] = filteredHallPosition_degx10 & 0b11111111;
 	canSendBuffer[1] = filteredHallPosition_degx10 >> 8;
-	canSendBuffer[2] = 0;//filteredCurrentDraw_mA >> 8;
-	canSendBuffer[3] = 0;//filteredCurrentDraw_mA;
-	canSendBuffer[4] = 0;//filteredVoltage_mV >> 8;
-	canSendBuffer[5] = 0;//filteredVoltage_mV;
+	canSendBuffer[2] = filteredCurrentDraw_mA & 0b11111111;
+	canSendBuffer[3] = filteredCurrentDraw_mA >> 8;
+	canSendBuffer[4] = filteredVoltage_mV & 0b11111111;
+	canSendBuffer[5] = filteredVoltage_mV >> 8;
 	canSendBuffer[6] = 0;//filteredTemp_degCx2;
 	
 	SPI.beginTransaction(SPI_SETTINGS_CAN);
 	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer);
 	SPI.endTransaction();
-  Serial.println("CAN sent");
 }
 
 void filterHallPosition(void)
@@ -117,28 +116,27 @@ void filterHallPosition(void)
 	filteredHallPosition_degx10 = filteredHallPosition_degx10 - (filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx10;
 	filteredHallPosition_degx10 = filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE);
 }
-/*
+
 
 //calculates the current consumption of the device. oversample and average.
 void calculateCurrent(void)
 {
-	uint16_t currentDraw_mA = analogRead(CURRENT_SENS)* math required to make work;
+	float currentDraw_mA = analogRead(CURRENT_SENS)/1023.0*5/(0.5)*1000; //0.5 in denom = 0.01*0.05*1000
 
 	filteredCurrentDraw_mA *= ADC_FILTER_SIZE;
-	filteredCurrentDraw_mA = filteredCurrentDraw_mA - (filteredCurrentDraw_mA >> filterShiftSize(ADC_FILTER_SIZE)) + currentDraw_mA;
-	filteredCurrentDraw_mA = filteredCurrentDraw_mA >> filterShiftSize(ADC_FILTER_SIZE);
+	filteredCurrentDraw_mA = (uint16_t) ((float) ((filteredCurrentDraw_mA - (filteredCurrentDraw_mA/ADC_FILTER_SIZE) + currentDraw_mA)/ADC_FILTER_SIZE));
 }
 
 //calculates the voltage input to the device, accounting for voltage drop due to current through the FET and shunt
 void calculateVoltage(void)
 {
-	uint16_t voltage_mV = analogRead(VOLTAGE_SENS)* math required to make work;
+	uint16_t voltage_mV = (uint16_t) (analogRead(VOLTAGE_SENS)/1023.0*5000*13.3/3.3);
 
 	filteredVoltage_mV *= ADC_FILTER_SIZE;
 	filteredVoltage_mV = filteredVoltage_mV - (filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE)) + voltage_mV;
-	filteredCVoltage_mV = filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE);
+	filteredVoltage_mV = filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE);
 }
-
+/*
 //calculates the temperature recorded by the thermistor
 void calculateTemperature(void)
 {
@@ -319,11 +317,10 @@ void loop()
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
 	{
 		previousCanMillis = millis();
-		//calculateCurrent();
-		//calculateVoltage();
+		calculateCurrent();
+		calculateVoltage();
 		//calculateTemperature();
-		//filterHallPosition();
-		Serial.println(filteredHallPosition_degx10);
+		filterHallPosition();
 		sendCanMsg();
 	}
 	//getHallPosition();

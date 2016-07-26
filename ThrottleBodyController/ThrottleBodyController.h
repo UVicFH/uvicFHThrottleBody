@@ -28,8 +28,8 @@ July 2016
 
 #define SPI_CAN_CS 9
 #define SPI_HALL_CS 10
-#define CURRENT_SENS 5
-#define VOLTAGE_SENS 6
+#define CURRENT_SENS 1
+#define VOLTAGE_SENS 0
 #define TEMP_SENS 7
 #define MOTOR_OPEN_PIN 5
 
