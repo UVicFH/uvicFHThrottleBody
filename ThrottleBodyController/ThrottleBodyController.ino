@@ -14,8 +14,8 @@ uint32_t previousPidMillis = 0;
 uint32_t previousCanMillis = 0;
 
 //received values from CAN
-uint16_t instThrottleRequest_degx10 = 0;
-float instThrottleRequest_deg = 0;
+uint16_t instThrottleRequest_percentx10 = 0;
+float instThrottleRequest_percent = 0;
 uint8_t instThrottleBlip_deg = 0;
 uint8_t instThrottleBlip_ms = 0;
 
@@ -23,13 +23,18 @@ uint8_t instThrottleBlip_ms = 0;
 uint16_t filteredCurrentDraw_mA = 0;									
 uint16_t filteredVoltage_mV = 0;										
 uint8_t filteredTemp_degCx2 = 0;							
-uint16_t zeroedHallPosition_degx10 = 0;							
+uint16_t zeroedHallPosition_percentx10 = 0;							
 
 //sensor feedback not sent over CAN
 uint16_t absoluteHallPosition_nominal = 0;	
 int32_t zeroedHallPosition_nominal = 0;         //note this is signed
 uint16_t hallZeroPosition_nominal = 0;
-float zeroedHallPosition_deg = 0;											
+float zeroedHallPosition_percent = 0;
+
+float controllerPTerm = 0;
+float controllerITerm = 0;
+float controllerDTerm = 0;
+float controllerPositionErrorPrev_percent = 0;											
 
 
 MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
@@ -96,8 +101,8 @@ void getZeroedHallPosition(void)
 	{
 		zeroedHallPosition_nominal = 0;
 	}
-	zeroedHallPosition_deg = (float) zeroedHallPosition_nominal/(16384.0/360.0);
-	zeroedHallPosition_degx10 = (uint16_t) ((float)zeroedHallPosition_deg*10.0);
+	zeroedHallPosition_percent = (float) zeroedHallPosition_nominal*360.0/16384.0*100.0/90.0;
+	zeroedHallPosition_percentx10 = (uint16_t) ((float)zeroedHallPosition_percent*10.0);
 }
 
 
@@ -125,15 +130,15 @@ void getCanMsg(void)
 	{
 		// read data,  len: data length, buf: data buf
 		CAN.readMsgBuf(&canMsgLength, canMsgData);
-		instThrottleRequest_degx10 = ((canMsgData[1]<<8) | canMsgData[0]);
+		instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
 		instThrottleBlip_ms = canMsgData[2];
 		instThrottleBlip_deg = canMsgData[3];
 		if(DEBUG)
 		{
 			Serial.print("CAN Throttle Request = ");
-			Serial.println(instThrottleRequest_degx10);
+			Serial.println(instThrottleRequest_percentx10);
 		}
-		instThrottleRequest_deg = (float) instThrottleRequest_degx10 / 10.0;
+		instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
 	}
 }
 
@@ -143,8 +148,8 @@ void sendCanMsg(void)
 {
 	uint8_t canSendBuffer[8];
 
-	canSendBuffer[0] = zeroedHallPosition_degx10 & 0b11111111;
-	canSendBuffer[1] = zeroedHallPosition_degx10 >> 8;
+	canSendBuffer[0] = zeroedHallPosition_percentx10 & 0b11111111;
+	canSendBuffer[1] = zeroedHallPosition_percentx10 >> 8;
 	canSendBuffer[2] = filteredCurrentDraw_mA & 0b11111111;
 	canSendBuffer[3] = filteredCurrentDraw_mA >> 8;
 	canSendBuffer[4] = filteredVoltage_mV & 0b11111111;
@@ -244,8 +249,69 @@ void validatePositions(void)
 //executes the PID controller and outputs to motor controller
 void executePid(void)
 {
-	
+	//calculate error
+	float controllerResult = 0;
+	float controllerPositionError_percent = instThrottleRequest_percent - zeroedHallPosition_percent;
 
+	if(instThrottleRequest_percent < 1.0)
+	{
+		controllerPositionError_percent = 0.0;
+	}
+
+	controllerPTerm = (float) controllerPositionError_percent * CONTROLLER_KP;
+	controllerITerm = (float) controllerPositionError_percent * PID_EXECUTION_INTERVAL/1000.0 * CONTROLLER_KI;
+	controllerDTerm = (float) (controllerPositionError_percent - controllerPositionErrorPrev_percent) / (PID_EXECUTION_INTERVAL/1000.0) * CONTROLLER_KD;
+
+	//done calculating D term, can set previous to current now
+	controllerPositionErrorPrev_percent = controllerPositionError_percent;
+
+	// Conditions applied to integral term
+	if(controllerPositionError_percent < CONTROLLER_I_TERM_RESET_THRESH_PERCENT)
+	{
+		controllerITerm = 0;
+	}
+	else if(controllerITerm > CONTROLLER_I_TERM_MAX)
+	{
+		controllerITerm = CONTROLLER_I_TERM_MAX;
+	}
+	else if(controllerITerm < CONTROLLER_I_TERM_MIN)
+	{
+		controllerITerm = CONTROLLER_I_TERM_MIN;
+	}
+
+	// Conditions applied to derivative term
+	if(controllerDTerm > CONTROLLER_D_TERM_MAX)
+	{
+		controllerDTerm = CONTROLLER_D_TERM_MAX;
+	}
+	else if(controllerDTerm < CONTROLLER_D_TERM_MIN)
+	{
+		controllerDTerm = CONTROLLER_D_TERM_MIN;
+	}
+
+	// Calculate controller result
+	controllerResult = controllerPTerm + controllerITerm + controllerDTerm;
+
+	// Limit controller effort
+	if(controllerResult > CONTROLLER_EFFORT_MAX)
+	{
+		controllerResult = CONTROLLER_EFFORT_MAX;
+	}
+	else if(controllerResult < CONTROLLER_EFFORT_MIN)
+	{
+		controllerResult = CONTROLLER_EFFORT_MIN;
+	}
+
+	if(controllerResult > 0)
+	{
+		controllerResult = controllerResult * 255 / CONTROLLER_EFFORT_MAX;
+		analogWrite(MOTOR_OPEN_PIN, controllerResult);
+		//probably want to turn off the other direction here!
+	}
+	if(controllerResult < 0)
+	{
+		//figure out how to get motor to run in reverse.
+	}
 }
 
 //calculates the filtered (moving avg) throttle input value
