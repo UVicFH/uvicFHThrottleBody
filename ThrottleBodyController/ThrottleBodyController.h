@@ -32,14 +32,15 @@ July 2016
 #define VOLTAGE_SENS 0
 #define TEMP_SENS 7
 #define MOTOR_OPEN_PIN 5
+#define MOTOR_CLOSE_PIN 4
 
 #define ADC_FILTER_SIZE 1
 #define HALL_AVERAGE_SIZE 1			//number of readings to take into account over 1ms. Makes reading more accurate.
 #define HALL_FILTER_SIZE 1			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
 #define HALL_ZERO_READING_COUNT 8
 
-#define PID_EXECUTION_INTERVAL 1	//number of ms between changes in PID controller
-#define CAN_SEND_INTERVAL 100
+#define PID_EXECUTION_INTERVAL 10	//number of ms between changes in PID controller
+#define CAN_SEND_INTERVAL 50
 
 #define HALL_GET_ANGLE 0x3FFF
 #define HALL_ZERO_ANGLE_HIGH 0x0016
@@ -47,6 +48,7 @@ July 2016
 #define HALL_NOP_COMMAND 0
 
 
+#define CAN_DIAG_MSG_ADDRESS 0x103
 #define CAN_THROTTLE_MSG_ADDRESS 0x102
 #define CAN_FEEDBACK_MSG_ADDRESS 0x101
 
@@ -56,9 +58,9 @@ July 2016
 SPISettings SPI_SETTINGS_HALL(16000000, MSBFIRST, SPI_MODE1);
 SPISettings SPI_SETTINGS_CAN(16000000, MSBFIRST, SPI_MODE0);
 
-#define CONTROLLER_KP 0.0314		//2 * (pi/2)/100
-#define CONTROLLER_KI 0.02355		// 1.5 * (pi/2)/100
-#define CONTROLLER_KD 0.0000942		// 0.006 * (pi/2)/100
+#define CONTROLLER_KP 0.04		//2 * (pi/2)/100
+#define CONTROLLER_KI 0.08		// 1.5 * (pi/2)/100
+#define CONTROLLER_KD 0.0002		// 0.006 * (pi/2)/100
 
 #define CONTROLLER_I_TERM_MAX 0.05
 #define CONTROLLER_I_TERM_MIN -0.05

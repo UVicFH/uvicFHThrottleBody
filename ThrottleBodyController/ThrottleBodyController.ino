@@ -6,12 +6,14 @@ July 2016
 
 #include <SPI.h>
 #include <mcp_can.h>
-#include "ThrottleBodyController.h"s
-//#include <TimerOne.h>
+#include "ThrottleBodyController.h"
+#include <TimerOne.h>
 
 uint8_t canIntRecv = 0;
 uint32_t previousPidMillis = 0;
 uint32_t previousCanMillis = 0;
+uint32_t pidTuningMillis1 = 0;
+uint8_t pidTuningState = 0;
 
 //received values from CAN
 uint16_t instThrottleRequest_percentx10 = 0;
@@ -34,7 +36,8 @@ float zeroedHallPosition_percent = 0;
 float controllerPTerm = 0;
 float controllerITerm = 0;
 float controllerDTerm = 0;
-float controllerPositionErrorPrev_percent = 0;											
+float controllerPositionErrorPrev_percent = 0;
+float controllerResult = 0;											
 
 
 MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
@@ -90,6 +93,7 @@ uint16_t getAbsoluteHallPosition(void)
 		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
 	}
 	absoluteHallPosition_nominal = hallPositionSum_nominal >> filterShiftSize(HALL_AVERAGE_SIZE);
+  absoluteHallPosition_nominal = 16383 - absoluteHallPosition_nominal;
 	return absoluteHallPosition_nominal;
 }
 
@@ -101,7 +105,7 @@ void getZeroedHallPosition(void)
 	{
 		zeroedHallPosition_nominal = 0;
 	}
-	zeroedHallPosition_percent = (float) zeroedHallPosition_nominal*360.0/16384.0*100.0/90.0;
+	zeroedHallPosition_percent = (float) zeroedHallPosition_nominal*360.0/16384.0*100.0/69.2;
 	zeroedHallPosition_percentx10 = (uint16_t) ((float)zeroedHallPosition_percent*10.0);
 }
 
@@ -117,6 +121,8 @@ void findHallZeroPosition(void)
 		delay(50);
 	}
 	hallZeroPosition_nominal = hallZeroPositionSum_nominal >> filterShiftSize(HALL_ZERO_READING_COUNT);
+	Serial.print("hallZeroPosition_nominal = ");
+	Serial.println(hallZeroPosition_nominal);
 }
 
 
@@ -131,13 +137,8 @@ void getCanMsg(void)
 		// read data,  len: data length, buf: data buf
 		CAN.readMsgBuf(&canMsgLength, canMsgData);
 		instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
-		instThrottleBlip_ms = canMsgData[2];
-		instThrottleBlip_deg = canMsgData[3];
-		if(DEBUG)
-		{
-			Serial.print("CAN Throttle Request = ");
-			Serial.println(instThrottleRequest_percentx10);
-		}
+		//instThrottleBlip_ms = canMsgData[2];
+		//instThrottleBlip_deg = canMsgData[3];
 		instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
 	}
 }
@@ -146,18 +147,39 @@ void getCanMsg(void)
 //sends the outgoing CAN message with updated variables
 void sendCanMsg(void)
 {
-	uint8_t canSendBuffer[8];
+	uint8_t canSendBuffer1[8];
 
-	canSendBuffer[0] = zeroedHallPosition_percentx10 & 0b11111111;
-	canSendBuffer[1] = zeroedHallPosition_percentx10 >> 8;
-	canSendBuffer[2] = filteredCurrentDraw_mA & 0b11111111;
-	canSendBuffer[3] = filteredCurrentDraw_mA >> 8;
-	canSendBuffer[4] = filteredVoltage_mV & 0b11111111;
-	canSendBuffer[5] = filteredVoltage_mV >> 8;
-	canSendBuffer[6] = 0;//filteredTemp_degCx2;
+	canSendBuffer1[0] = zeroedHallPosition_percentx10 & 0b11111111;
+	canSendBuffer1[1] = zeroedHallPosition_percentx10 >> 8;
+	canSendBuffer1[2] = filteredCurrentDraw_mA & 0b11111111;
+	canSendBuffer1[3] = filteredCurrentDraw_mA >> 8;
+	canSendBuffer1[4] = filteredVoltage_mV & 0b11111111;
+	canSendBuffer1[5] = filteredVoltage_mV >> 8;
+	canSendBuffer1[6] = 0;//filteredTemp_degCx2;
+
+  uint8_t canSendBuffer2[8];
+  canSendBuffer2[0] = (int8_t) instThrottleRequest_percent;
+  canSendBuffer2[1] = ((int8_t) (100.0 * controllerResult)) & 0b01111111;
+  canSendBuffer2[2] = 0;
+  canSendBuffer2[3] = 0;
+  canSendBuffer2[4] = 0;
+  canSendBuffer2[5] = 0;
+  canSendBuffer2[6] = 0;  
 	
 	SPI.beginTransaction(SPI_SETTINGS_CAN);
-	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer);
+	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer1);
+  CAN.sendMsgBuf(0x104, 0, 8, canSendBuffer2);
+
+  while(CAN_MSGAVAIL == CAN.checkReceive())
+  {
+      uint8_t canMsgLength = 0;
+      uint8_t canMsgData[8];
+
+      CAN.readMsgBuf(&canMsgLength, canMsgData);
+      instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
+      instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
+  } 
+  
 	SPI.endTransaction();
 }
 
@@ -250,21 +272,23 @@ void validatePositions(void)
 void executePid(void)
 {
 	//calculate error
-	float controllerResult = 0;
-	float controllerPositionError_percent = instThrottleRequest_percent - zeroedHallPosition_percent;
 
+	float controllerPositionError_percent = instThrottleRequest_percent - zeroedHallPosition_percent;
+ 
+	Serial.println((int8_t) controllerPositionError_percent);
+/*
 	if(instThrottleRequest_percent < 1.0)
 	{
 		controllerPositionError_percent = 0.0;
 	}
-
+*/
 	controllerPTerm = (float) controllerPositionError_percent * CONTROLLER_KP;
-	controllerITerm = (float) controllerPositionError_percent * PID_EXECUTION_INTERVAL/1000.0 * CONTROLLER_KI;
-	controllerDTerm = (float) (controllerPositionError_percent - controllerPositionErrorPrev_percent) / (PID_EXECUTION_INTERVAL/1000.0) * CONTROLLER_KD;
+	//controllerITerm = (float) controllerPositionError_percent * PID_EXECUTION_INTERVAL/1000.0 * CONTROLLER_KI;                                                //integral and derivative need to be fixed!!!
+	//controllerDTerm = (float) (controllerPositionError_percent - controllerPositionErrorPrev_percent) / (PID_EXECUTION_INTERVAL/1000.0) * CONTROLLER_KD;
 
 	//done calculating D term, can set previous to current now
-	controllerPositionErrorPrev_percent = controllerPositionError_percent;
-
+	//controllerPositionErrorPrev_percent = controllerPositionError_percent;
+/*
 	// Conditions applied to integral term
 	if(controllerPositionError_percent < CONTROLLER_I_TERM_RESET_THRESH_PERCENT)
 	{
@@ -288,7 +312,7 @@ void executePid(void)
 	{
 		controllerDTerm = CONTROLLER_D_TERM_MIN;
 	}
-
+*/
 	// Calculate controller result
 	controllerResult = controllerPTerm + controllerITerm + controllerDTerm;
 
@@ -302,15 +326,35 @@ void executePid(void)
 		controllerResult = CONTROLLER_EFFORT_MIN;
 	}
 
+	/*
+	uint8_t canSendBuffer[8];
+
+	canSendBuffer[0] = ((int16_t) (100.0 * controllerPTerm)) & 0b11111111;
+	canSendBuffer[1] = ((int16_t) (100.0 * controllerPTerm)) >> 8;
+	canSendBuffer[2] = ((int16_t) (100.0 * controllerITerm)) & 0b11111111;
+	canSendBuffer[3] = ((int16_t) (100.0 * controllerITerm)) >> 8;
+	canSendBuffer[4] = ((int16_t) (1000.0 * controllerDTerm)) & 0b11111111;
+	canSendBuffer[5] = ((int16_t) (1000.0 * controllerDTerm)) >> 8;
+	canSendBuffer[6] = ((int16_t) (1000.0 * controllerResult)) & 0b11111111;
+	canSendBuffer[7] = ((int16_t) (1000.0 * controllerResult)) >> 8;
+
+	SPI.beginTransaction(SPI_SETTINGS_CAN);
+	CAN.sendMsgBuf(CAN_DIAG_MSG_ADDRESS,0,8,canSendBuffer);
+	SPI.endTransaction();
+ */
+
+	// Take action on the pin ports
 	if(controllerResult > 0)
 	{
-		controllerResult = controllerResult * 255 / CONTROLLER_EFFORT_MAX;
+		Timer1.pwm(MOTOR_CLOSE_PIN, 0);
+		controllerResult = controllerResult * 255;
 		analogWrite(MOTOR_OPEN_PIN, controllerResult);
-		//probably want to turn off the other direction here!
 	}
-	if(controllerResult < 0)
+	else if(controllerResult <= 0)
 	{
-		//figure out how to get motor to run in reverse.
+		analogWrite(MOTOR_OPEN_PIN, 0);
+		//controllerResult = controllerResult * 255;
+		//Timer1.pwm(MOTOR_CLOSE_PIN, controllerResult);
 	}
 }
 
@@ -326,7 +370,7 @@ void setup()
 
 	Serial.begin(115200);
   SPI.begin();
-//	Timer1.initialize(200);  // 200 us = 5000 Hz
+	Timer1.initialize(1000);  // 1000 us = 1000 Hz
 
 	//output = 1, input = 0
 	DDRB |= 0b00000110; //PB1 and PB2 are outputs
@@ -346,13 +390,15 @@ void setup()
 		}
 	}
 
+  Timer1.pwm(MOTOR_CLOSE_PIN, 0);
+  analogWrite(MOTOR_OPEN_PIN, 0);
 
-	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
-	CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
-	CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
-	CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
+	//CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
+	//CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
+	//CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
+	//CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
 
-	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
+	//attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
 
 	delay(500);
 	findHallZeroPosition();
@@ -362,17 +408,54 @@ void setup()
 
 void loop()
 {
-	if(canIntRecv == 1)
-	{
-		canIntRecv = 0;
-		getCanMsg();
-	}
+  /*
+  if(millis() - previousCanReceiveMillis >= 50)
+  {
+    SPI.beginTransaction(SPI_SETTINGS_CAN);
+	  if(CAN_MSGAVAIL == CAN.checkReceive())
+	  {
+        uint8_t canMsgLength = 0;
+        uint8_t canMsgData[8];
+
+        CAN.readMsgBuf(&canMsgLength, canMsgData);
+        instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
+        instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
+    } 
+    SPI.endTransaction();
+  }
+  */
+
+		//canIntRecv = 0;
+		//getCanMsg();
+/*
+  if(millis() - pidTuningMillis1 >= 5000)
+  {
+    pidTuningMillis1 = millis();
+    if(pidTuningState == 0)
+    {
+      pidTuningState = 1;
+    }
+    else
+    {
+      pidTuningState = 0;
+    }
+  }
+
+  if(pidTuningState == 1)
+  {
+    instThrottleRequest_percent = 30.0;
+  }
+  else
+  {
+    instThrottleRequest_percent = 0.0;
+  }
+  */
 
 	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
 	{
 		previousPidMillis = millis();
 		getZeroedHallPosition();
-		//executePid(); 
+		executePid(); 
 	}
 
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
