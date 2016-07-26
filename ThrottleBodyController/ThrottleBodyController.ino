@@ -19,68 +19,98 @@ uint8_t instThrottleBlip_deg = 0;
 uint8_t instThrottleBlip_ms = 0;
 
 //values to be sent over CAN
-uint16_t filteredCurrentDraw_mA = 0;									//done
-uint16_t filteredVoltage_mV = 0;										//done
-uint8_t filteredTemp_degCx2 = 0;										//done
-uint16_t filteredHallPosition_degx10 = 0;								//done
+uint16_t filteredCurrentDraw_mA = 0;									
+uint16_t filteredVoltage_mV = 0;										
+uint8_t filteredTemp_degCx2 = 0;							
+uint16_t zeroedHallPosition_degx10 = 0;							
 
 //sensor feedback not sent over CAN
-float averagedHallPosition_degx10 = 0;	
-uint16_t motorPosQuad_deg = 0;											//done
-uint32_t hallZeroPosition = 0;
+uint16_t absoluteHallPosition_nominal = 0;	
+int32_t zeroedHallPosition_nominal = 0;         //note this is signed
+uint16_t hallZeroPosition_nominal = 0;
+float zeroedHallPosition_deg = 0;											
+
 
 MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
 
-void zeroHallPosition(void)
+uint16_t as5048aRemoveParity(uint16_t command)
 {
-	float hallZeroPosition_float = 0.0;
-	for(int i = 0; i<HALL_ZERO_READING_COUNT; i++)
-	{
-		hallZeroPosition += as5048aReadCommand(HALL_GET_ANGLE);
-		delay(20);
-	}
-	hallZeroPosition_float = hallZeroPosition/HALL_ZERO_READING_COUNT;
-  hallZeroPosition = (uint32_t) hallZeroPosition_float;
-	Serial.println("Hall zero measurements complete.");
-	Serial.print("Hall sensor zero position is: ");
-	Serial.println(hallZeroPosition);
+	return (command &= 0b0011111111111111);                 //clears parity and error bit
 }
 
-void setup()
-{
 
-	Serial.begin(115200);
-  SPI.begin();
-//	Timer1.initialize(200);  // 200 us = 5000 Hz
+uint8_t as5048aSetParity(uint16_t value){
+	uint8_t cnt = 0;
+	uint8_t i;
 
-	//output = 1, input = 0
-	DDRB |= 0b00000110; //PB1 and PB2 are outputs
-	DDRC |= 0b00000000; //no outputs on PC
-	DDRD |= 0b00110000; //PD4 PD5 are outputs    output = 1  
-	while(1)
+	for (i = 0; i < 16; i++)
 	{
-		if(CAN_OK == CAN.begin(CAN_500KBPS))
+		if (value & 0x1)
 		{
-			Serial.println("CAN BUS INIT GOOD");
-			break;
+			cnt++;
 		}
-		else
-		{
-			Serial.println("CAN BUS INIT FAIL, RETRY");
-			delay(100);
-		}
+		value >>= 1;
 	}
+	return cnt & 0x1;
+}
 
 
-	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
-    CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
-    CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
-    CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
+uint16_t as5048aReadCommand(uint16_t spiSendCommand)
+{
+	uint16_t hallPosition_nominal = 0;
 
-	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
+	spiSendCommand |= 0b0100000000000000;           //OR operator sets the read/write bit to READ
+	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
 
-	delay(500);
-	//zeroHallPosition();
+	SPI.beginTransaction(SPI_SETTINGS_HALL);
+
+	digitalWrite(SPI_HALL_CS, LOW);
+	hallPosition_nominal = SPI.transfer16(spiSendCommand);
+	digitalWrite(SPI_HALL_CS,HIGH);
+
+	SPI.endTransaction();
+
+	hallPosition_nominal = as5048aRemoveParity(returnVal);
+
+	return hallPosition_nominal;
+}
+
+
+uint16_t getAbsoluteHallPosition(void)
+{
+	uint16_t hallPositionSum_nominal = 0;
+	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
+	{
+		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
+	}
+	absoluteHallPosition_nominal = hallPositionSum_nominal >> filterShiftSize(HALL_AVERAGE_SIZE);
+	return absoluteHallPosition_nominal;
+}
+
+void getZeroedHallPosition(void)
+{
+	zeroedHallPosition_nominal = absoluteHallPosition_nominal - hallZeroPosition_nominal;
+	if(zeroedHallPosition_nominal < 0)
+	{
+		zeroedHallPosition_nominal = 0;
+	}
+	
+	zeroedHallPosition_deg = (float) zeroedHallPosition_nominal/(16384.0/360.0);
+	zeroedHallPosition_degx10 = (uint16_t) zeroedHallPosition_deg*10.0;
+}
+
+
+void findHallZeroPosition(void)
+{
+	uint32_t hallZeroPositionSum_nominal = 0;
+	getAbsoluteHallPosition();
+
+	for(int i = 0; i<HALL_ZERO_READING_COUNT; i++)
+	{
+		hallZeroPositionSum_nominal += getAbsoluteHallPosition();
+		delay(50);
+	}
+	hallZeroPosition_nominal = hallZeroPositionSum_nominal >> filterShiftSize(HALL_ZERO_READING_COUNT);
 }
 
 
@@ -93,26 +123,27 @@ void getCanMsg(void)
 	uint8_t canMsgData[8];
 
 	while (CAN_MSGAVAIL == CAN.checkReceive()) 
-    {
-        // read data,  len: data length, buf: data buf
-        CAN.readMsgBuf(&canMsgLength, canMsgData);
-        instThrottleRequest_degx10 = (canMsgData[1]<<8) + canMsgData[0];
-        instThrottleBlip_ms = canMsgData[2];
-        instThrottleBlip_deg = canMsgData[3];
-        if(DEBUG)
-        {
-        	Serial.print("CAN Throttle Request = ");
-        	Serial.println(instThrottleRequest_degx10);
-        }
-    }
+	{
+		// read data,  len: data length, buf: data buf
+		CAN.readMsgBuf(&canMsgLength, canMsgData);
+		instThrottleRequest_degx10 = (canMsgData[1]<<8) + canMsgData[0];
+		instThrottleBlip_ms = canMsgData[2];
+		instThrottleBlip_deg = canMsgData[3];
+		if(DEBUG)
+		{
+			Serial.print("CAN Throttle Request = ");
+			Serial.println(instThrottleRequest_degx10);
+		}
+	}
 }
 */
 //sends the outgoing CAN message with updated variables
 void sendCanMsg(void)
 {
 	uint8_t canSendBuffer[8];
-	canSendBuffer[0] = filteredHallPosition_degx10 & 0b11111111;
-	canSendBuffer[1] = filteredHallPosition_degx10 >> 8;
+
+	canSendBuffer[0] = zeroedHallPosition_degx10 & 0b11111111;
+	canSendBuffer[1] = zeroedHallPosition_degx10 >> 8;
 	canSendBuffer[2] = filteredCurrentDraw_mA & 0b11111111;
 	canSendBuffer[3] = filteredCurrentDraw_mA >> 8;
 	canSendBuffer[4] = filteredVoltage_mV & 0b11111111;
@@ -126,7 +157,7 @@ void sendCanMsg(void)
 
 void filterHallPosition(void)
 {
-	uint16_t hallPosition_degx10 = (uint16_t) averagedHallPosition_degx10 * 10; 
+	uint16_t hallPosition_degx10 = (uint16_t) zeroedHallPosition_degx10 * 10; 
 
 	filteredHallPosition_degx10 *= HALL_FILTER_SIZE;
 	filteredHallPosition_degx10 = filteredHallPosition_degx10 - (filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx10;
@@ -193,15 +224,6 @@ uint8_t filterShiftSize(uint8_t filterSize)
 		case 128:
 			shiftSize = 7;
 			break;
-		case 256:
-			shiftSize = 8;
-			break;
-		case 512:
-			shiftSize = 9;
-			break;
-		default:
-			shiftSize = 0;
-			break;
 	}
 	return shiftSize;	
 }
@@ -213,61 +235,7 @@ void adcMovingSum(uint8_t adcPin, uint16_t *pAdcSum, uint8_t filterSize)
 }
 */
 
-uint8_t as5048aSetParity(uint16_t value){
-	uint8_t cnt = 0;
-	uint8_t i;
 
-	for (i = 0; i < 16; i++)
-	{
-		if (value & 0x1)
-		{
-			cnt++;
-		}
-		value >>= 1;
-	}
-	return cnt & 0x1;
-}
-
-uint16_t as5048aRemoveParity(uint16_t command)
-{
-	return (command &= 0b0011111111111111);									//clears parity and error bit
-}
-
-uint16_t as5048aReadCommand(uint16_t spiSendCommand)
-{
-	uint16_t returnVal = 0;
-	uint8_t right_byte = 0;
-	uint8_t left_byte = 0;
-
-	spiSendCommand |= 0b0100000000000000; 					//OR operator sets the read/write bit to READ
-	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
-
-	SPI.beginTransaction(SPI_SETTINGS_HALL);
-
-	digitalWrite(SPI_HALL_CS, LOW);
-	returnVal = SPI.transfer16(spiSendCommand);
-	digitalWrite(SPI_HALL_CS,HIGH);
-
-	SPI.endTransaction();
- 
-	returnVal = as5048aRemoveParity(returnVal);
-	//returnVal -= hallZeroPosition;
-
-	return returnVal;
-}
-
-//gets the position of the low speed shaft from the hall sensor IC
-void getHallPosition(void)
-{
-	uint16_t hallPositionSum_nominal = 0;
-
-	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
-	{
-		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
-	}
-
-	averagedHallPosition_degx10 = (float) 10.0*(hallPositionSum_nominal/(float)HALL_AVERAGE_SIZE)/(16384.0/360.0); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
-}
 
 //calculates the position of the motor shaft from the quad encoder
 void calculateQuadPosition(void)
@@ -300,6 +268,46 @@ void filterThrottle(void)
 
 }
 
+
+void setup()
+{
+
+	Serial.begin(115200);
+  SPI.begin();
+//	Timer1.initialize(200);  // 200 us = 5000 Hz
+
+	//output = 1, input = 0
+	DDRB |= 0b00000110; //PB1 and PB2 are outputs
+	DDRC |= 0b00000000; //no outputs on PC
+	DDRD |= 0b00110000; //PD4 PD5 are outputs    output = 1  
+	while(1)
+	{
+		if(CAN_OK == CAN.begin(CAN_500KBPS))
+		{
+			Serial.println("CAN BUS INIT GOOD");
+			break;
+		}
+		else
+		{
+			Serial.println("CAN BUS INIT FAIL, RETRY");
+			delay(100);
+		}
+	}
+
+
+	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
+	CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
+	CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
+	CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
+
+	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
+
+	delay(500);
+	zeroHallPosition();
+}
+
+
+
 void loop()
 {
 	/*
@@ -313,8 +321,8 @@ void loop()
 	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
 	{
 		previousPidMillis = millis();
-    getHallPosition();
-    filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10;
+	getHallPosition();
+	filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10;
 		//executePid(); 
 	}
 
@@ -322,7 +330,7 @@ void loop()
 	{
 		previousCanMillis = millis();
 		//getHallPosition();
-    //filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10 * 10.0;
+	//filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10 * 10.0;
 		calculateCurrent();
 		calculateVoltage();
 		//calculateTemperature();
@@ -335,5 +343,5 @@ void loop()
 
 void MCP2515_ISR()
 {
-    canIntRecv = 1;
+	canIntRecv = 1;
 }
