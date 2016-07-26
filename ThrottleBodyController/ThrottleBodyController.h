@@ -26,31 +26,50 @@ July 2016
 #define BM14 (1<<14)
 #define BM15 (1<<15)
 
-#define SPI_CAN_CS 10
-#define SPI_HALL_CS 9
-#define CURRENT_SENS 5
-#define VOLTAGE_SENS 6
+#define SPI_CAN_CS 9
+#define SPI_HALL_CS 10
+#define CURRENT_SENS 1
+#define VOLTAGE_SENS 0
 #define TEMP_SENS 7
+#define MOTOR_OPEN_PIN 5
 
-#define ADC_FILTER_SIZE 4
-#define HALL_AVERAGE_SIZE 5			//number of readings to take into account over 1ms. Makes reading more accurate.
-#define HALL_FILTER_SIZE 4			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
+#define ADC_FILTER_SIZE 1
+#define HALL_AVERAGE_SIZE 1			//number of readings to take into account over 1ms. Makes reading more accurate.
+#define HALL_FILTER_SIZE 1			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
+#define HALL_ZERO_READING_COUNT 8
 
 #define PID_EXECUTION_INTERVAL 1	//number of ms between changes in PID controller
-#define CAN_SEND_INTERVAL 10
+#define CAN_SEND_INTERVAL 100
 
 #define HALL_GET_ANGLE 0x3FFF
 #define HALL_ZERO_ANGLE_HIGH 0x0016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
 
+
 #define CAN_THROTTLE_MSG_ADDRESS 0x102
-#define CAN_FEEDBACK_MSG_ADDRESS 0x103
+#define CAN_FEEDBACK_MSG_ADDRESS 0x101
 
-#define SPI_HALL_SELECT() PORTB &= ~(1<<SPI_HALL_CS)				//digitalWrite(SPI_HALL_CS, LOW)
-#define SPI_HALL_UNSELECT() PORTB |= (1<<SPI_HALL_CS) 			//digitalWrite(SPI_HALL_CS, HIGH)
+#define SPI_HALL_SELECT() PORTB &= ~(0b00000100)				//digitalWrite(SPI_HALL_CS, LOW)
+#define SPI_HALL_DESELECT() PORTB |= (0b00000100) 			//digitalWrite(SPI_HALL_CS, HIGH)
 
-#define SPI_SETTINGS_HALL SPISettings(1000000, MSBFIRST, SPI_MODE_1);
-#define SPI_SETTINGS_CAN SPISettings(1000000, MSBFIRST, SPI_MODE_0);
+SPISettings SPI_SETTINGS_HALL(16000000, MSBFIRST, SPI_MODE1);
+SPISettings SPI_SETTINGS_CAN(16000000, MSBFIRST, SPI_MODE0);
+
+#define CONTROLLER_KP 0.0314		//2 * (pi/2)/100
+#define CONTROLLER_KI 0.02355		// 1.5 * (pi/2)/100
+#define CONTROLLER_KD 0.0000942		// 0.006 * (pi/2)/100
+
+#define CONTROLLER_I_TERM_MAX 0.05
+#define CONTROLLER_I_TERM_MIN -0.05
+#define CONTROLLER_I_TERM_RESET_THRESH_PERCENT -5
+
+#define CONTROLLER_D_TERM_MAX 0.017
+#define CONTROLLER_D_TERM_MIN 0
+
+#define CONTROLLER_EFFORT_MAX 1
+#define CONTROLLER_EFFORT_MIN 0
+
+
 
 #endif // THROTTLEBODYCONTROLLER_H
