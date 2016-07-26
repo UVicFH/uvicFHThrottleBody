@@ -15,6 +15,7 @@ uint32_t previousCanMillis = 0;
 
 //received values from CAN
 uint16_t instThrottleRequest_degx10 = 0;
+float instThrottleRequest_deg = 0;
 uint8_t instThrottleBlip_deg = 0;
 uint8_t instThrottleBlip_ms = 0;
 
@@ -70,7 +71,7 @@ uint16_t as5048aReadCommand(uint16_t spiSendCommand)
 
 	SPI.endTransaction();
 
-	hallPosition_nominal = as5048aRemoveParity(returnVal);
+	hallPosition_nominal = as5048aRemoveParity(hallPosition_nominal);
 
 	return hallPosition_nominal;
 }
@@ -89,14 +90,14 @@ uint16_t getAbsoluteHallPosition(void)
 
 void getZeroedHallPosition(void)
 {
-	zeroedHallPosition_nominal = absoluteHallPosition_nominal - hallZeroPosition_nominal;
+	getAbsoluteHallPosition();
+	zeroedHallPosition_nominal = (int32_t) absoluteHallPosition_nominal - hallZeroPosition_nominal;
 	if(zeroedHallPosition_nominal < 0)
 	{
 		zeroedHallPosition_nominal = 0;
 	}
-	
 	zeroedHallPosition_deg = (float) zeroedHallPosition_nominal/(16384.0/360.0);
-	zeroedHallPosition_degx10 = (uint16_t) zeroedHallPosition_deg*10.0;
+	zeroedHallPosition_degx10 = (uint16_t) ((float)zeroedHallPosition_deg*10.0);
 }
 
 
@@ -114,8 +115,6 @@ void findHallZeroPosition(void)
 }
 
 
-
-/*
 //gets the CAN message in the buffer, and reads the required values
 void getCanMsg(void)
 {
@@ -126,7 +125,7 @@ void getCanMsg(void)
 	{
 		// read data,  len: data length, buf: data buf
 		CAN.readMsgBuf(&canMsgLength, canMsgData);
-		instThrottleRequest_degx10 = (canMsgData[1]<<8) + canMsgData[0];
+		instThrottleRequest_degx10 = ((canMsgData[1]<<8) | canMsgData[0]);
 		instThrottleBlip_ms = canMsgData[2];
 		instThrottleBlip_deg = canMsgData[3];
 		if(DEBUG)
@@ -134,9 +133,11 @@ void getCanMsg(void)
 			Serial.print("CAN Throttle Request = ");
 			Serial.println(instThrottleRequest_degx10);
 		}
+		instThrottleRequest_deg = (float) instThrottleRequest_degx10 / 10.0;
 	}
 }
-*/
+
+
 //sends the outgoing CAN message with updated variables
 void sendCanMsg(void)
 {
@@ -153,15 +154,6 @@ void sendCanMsg(void)
 	SPI.beginTransaction(SPI_SETTINGS_CAN);
 	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer);
 	SPI.endTransaction();
-}
-
-void filterHallPosition(void)
-{
-	uint16_t hallPosition_degx10 = (uint16_t) zeroedHallPosition_degx10 * 10; 
-
-	filteredHallPosition_degx10 *= HALL_FILTER_SIZE;
-	filteredHallPosition_degx10 = filteredHallPosition_degx10 - (filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx10;
-	filteredHallPosition_degx10 = filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE);
 }
 
 
@@ -227,13 +219,6 @@ uint8_t filterShiftSize(uint8_t filterSize)
 	}
 	return shiftSize;	
 }
-/*
-void adcMovingSum(uint8_t adcPin, uint16_t *pAdcSum, uint8_t filterSize)
-{
-	uint16_t newAdcValue = analogRead(adcPin);
-	*pAdcAverage = *pAdcAverage - (*pAdcAverage >> filterShiftSize(filterSize)) + newAdcValue;
-}
-*/
 
 
 
@@ -259,6 +244,7 @@ void validatePositions(void)
 //executes the PID controller and outputs to motor controller
 void executePid(void)
 {
+	
 
 }
 
@@ -303,42 +289,34 @@ void setup()
 	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
 
 	delay(500);
-	zeroHallPosition();
+	findHallZeroPosition();
 }
 
 
 
 void loop()
 {
-	/*
-	if(canIntRecv ==1)
+	if(canIntRecv == 1)
 	{
 		canIntRecv = 0;
 		getCanMsg();
 	}
 
- */
 	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
 	{
 		previousPidMillis = millis();
-	getHallPosition();
-	filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10;
+		getZeroedHallPosition();
 		//executePid(); 
 	}
 
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
 	{
 		previousCanMillis = millis();
-		//getHallPosition();
-	//filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10 * 10.0;
 		calculateCurrent();
 		calculateVoltage();
 		//calculateTemperature();
-		//filterHallPosition();
 		sendCanMsg();
 	}
-	//getHallPosition();
-	//delay(100);
 }
 
 void MCP2515_ISR()
