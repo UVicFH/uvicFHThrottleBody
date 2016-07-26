@@ -25,11 +25,26 @@ uint8_t filteredTemp_degCx2 = 0;										//done
 uint16_t filteredHallPosition_degx10 = 0;								//done
 
 //sensor feedback not sent over CAN
-float averagedHallPosition_deg = 0;	
+float averagedHallPosition_degx10 = 0;	
 uint16_t motorPosQuad_deg = 0;											//done
 uint32_t hallZeroPosition = 0;
 
 MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
+
+void zeroHallPosition(void)
+{
+	float hallZeroPosition_float = 0.0;
+	for(int i = 0; i<HALL_ZERO_READING_COUNT; i++)
+	{
+		hallZeroPosition += as5048aReadCommand(HALL_GET_ANGLE);
+		delay(20);
+	}
+	hallZeroPosition_float = hallZeroPosition/HALL_ZERO_READING_COUNT;
+  hallZeroPosition = (uint32_t) hallZeroPosition_float;
+	Serial.println("Hall zero measurements complete.");
+	Serial.print("Hall sensor zero position is: ");
+	Serial.println(hallZeroPosition);
+}
 
 void setup()
 {
@@ -56,18 +71,19 @@ void setup()
 		}
 	}
 
-/*
+
 	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
     CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
-    CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADRESS);							//filter 0 for receive buffer 0
-    CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADRESS);							//filter 1 for receive buffer 1
+    CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
+    CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
 
 	attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
 
-	delay(200);
-	zeroHallPosition();
-	*/
+	delay(500);
+	//zeroHallPosition();
 }
+
+
 
 /*
 //gets the CAN message in the buffer, and reads the required values
@@ -110,7 +126,7 @@ void sendCanMsg(void)
 
 void filterHallPosition(void)
 {
-	uint16_t hallPosition_degx10 = (int) averagedHallPosition_deg * 10; 
+	uint16_t hallPosition_degx10 = (uint16_t) averagedHallPosition_degx10 * 10; 
 
 	filteredHallPosition_degx10 *= HALL_FILTER_SIZE;
 	filteredHallPosition_degx10 = filteredHallPosition_degx10 - (filteredHallPosition_degx10 >> filterShiftSize(HALL_FILTER_SIZE)) + hallPosition_degx10;
@@ -226,28 +242,16 @@ uint16_t as5048aReadCommand(uint16_t spiSendCommand)
 	spiSendCommand |= 0b0100000000000000; 					//OR operator sets the read/write bit to READ
 	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
 
-	right_byte = spiSendCommand & 0b11111111;
-	left_byte = (spiSendCommand >> 8) & 0b11111111;
-	
-	//Serial.print("spiSendCommand = ");
-	//Serial.println(spiSendCommand, HEX);
-
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
 
 	digitalWrite(SPI_HALL_CS, LOW);
-	SPI.transfer(left_byte);
-	SPI.transfer(right_byte);
+	returnVal = SPI.transfer16(spiSendCommand);
 	digitalWrite(SPI_HALL_CS,HIGH);
 
-	digitalWrite(SPI_HALL_CS, LOW);
-	left_byte = SPI.transfer(0x00);
-	right_byte = SPI.transfer(0x00);
-	digitalWrite(SPI_HALL_CS, HIGH);
-
 	SPI.endTransaction();
-
-	returnVal = (right_byte) | (left_byte << 8);
+ 
 	returnVal = as5048aRemoveParity(returnVal);
+	//returnVal -= hallZeroPosition;
 
 	return returnVal;
 }
@@ -262,7 +266,7 @@ void getHallPosition(void)
 		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
 	}
 
-	averagedHallPosition_deg = (hallPositionSum_nominal/HALL_AVERAGE_SIZE) / (16384/360); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
+	averagedHallPosition_degx10 = (float) 10.0*(hallPositionSum_nominal/(float)HALL_AVERAGE_SIZE)/(16384.0/360.0); 			//average readings to find 0-16383 range from sensor, 0-360 degrees
 }
 
 //calculates the position of the motor shaft from the quad encoder
@@ -309,18 +313,20 @@ void loop()
 	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
 	{
 		previousPidMillis = millis();
-		getHallPosition();
-    	filterHallPosition();
+    getHallPosition();
+    filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10;
 		//executePid(); 
 	}
 
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
 	{
 		previousCanMillis = millis();
+		//getHallPosition();
+    //filteredHallPosition_degx10 = (uint16_t) averagedHallPosition_degx10 * 10.0;
 		calculateCurrent();
 		calculateVoltage();
 		//calculateTemperature();
-		filterHallPosition();
+		//filterHallPosition();
 		sendCanMsg();
 	}
 	//getHallPosition();

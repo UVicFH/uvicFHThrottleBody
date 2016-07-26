@@ -33,9 +33,9 @@ July 2016
 #define TEMP_SENS 7
 #define MOTOR_OPEN_PIN 5
 
-#define ADC_FILTER_SIZE 4
+#define ADC_FILTER_SIZE 1
 #define HALL_AVERAGE_SIZE 1			//number of readings to take into account over 1ms. Makes reading more accurate.
-#define HALL_FILTER_SIZE 4			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
+#define HALL_FILTER_SIZE 1			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
 
 #define PID_EXECUTION_INTERVAL 1	//number of ms between changes in PID controller
 #define CAN_SEND_INTERVAL 100
@@ -44,6 +44,7 @@ July 2016
 #define HALL_ZERO_ANGLE_HIGH 0x0016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
+#define HALL_ZERO_READING_COUNT 10
 
 #define CAN_THROTTLE_MSG_ADDRESS 0x102
 #define CAN_FEEDBACK_MSG_ADDRESS 0x101
@@ -51,7 +52,7 @@ July 2016
 #define SPI_HALL_SELECT() PORTB &= ~(0b00000100)				//digitalWrite(SPI_HALL_CS, LOW)
 #define SPI_HALL_DESELECT() PORTB |= (0b00000100) 			//digitalWrite(SPI_HALL_CS, HIGH)
 
-SPISettings SPI_SETTINGS_HALL(1000000, MSBFIRST, SPI_MODE1);
+SPISettings SPI_SETTINGS_HALL(16000000, MSBFIRST, SPI_MODE1);
 SPISettings SPI_SETTINGS_CAN(16000000, MSBFIRST, SPI_MODE0);
 
 #endif // THROTTLEBODYCONTROLLER_H
