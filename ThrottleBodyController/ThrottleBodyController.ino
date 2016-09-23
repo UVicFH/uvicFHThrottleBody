@@ -8,6 +8,7 @@ July 2016
 #include <mcp_can.h>
 #include "ThrottleBodyController.h"
 #include <TimerOne.h>
+#include <math.h>
 
 uint8_t canIntRecv = 0;
 uint32_t previousPidMillis = 0;
@@ -148,6 +149,7 @@ void getCanMsg(void)
 void sendCanMsg(void)
 {
 	uint8_t canSendBuffer1[8];
+	uint8_t canSendBuffer2[8];
 
 	canSendBuffer1[0] = zeroedHallPosition_percentx10 & 0b11111111;
 	canSendBuffer1[1] = zeroedHallPosition_percentx10 >> 8;
@@ -155,31 +157,30 @@ void sendCanMsg(void)
 	canSendBuffer1[3] = filteredCurrentDraw_mA >> 8;
 	canSendBuffer1[4] = filteredVoltage_mV & 0b11111111;
 	canSendBuffer1[5] = filteredVoltage_mV >> 8;
-	canSendBuffer1[6] = 0;//filteredTemp_degCx2;
+	canSendBuffer1[6] = filteredTemp_degCx2;
 
-  uint8_t canSendBuffer2[8];
-  canSendBuffer2[0] = (int8_t) instThrottleRequest_percent;
-  canSendBuffer2[1] = ((int8_t) (100.0 * controllerResult)) & 0b01111111;
-  canSendBuffer2[2] = 0;
-  canSendBuffer2[3] = 0;
-  canSendBuffer2[4] = 0;
-  canSendBuffer2[5] = 0;
-  canSendBuffer2[6] = 0;  
+	canSendBuffer2[0] = (int8_t) instThrottleRequest_percent;
+	canSendBuffer2[1] = ((int8_t) (100.0 * controllerResult)) & 0b01111111;
+	canSendBuffer2[2] = 0;
+	canSendBuffer2[3] = 0;
+	canSendBuffer2[4] = 0;
+	canSendBuffer2[5] = 0;
+	canSendBuffer2[6] = 0;  
 	
 	SPI.beginTransaction(SPI_SETTINGS_CAN);
 	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer1);
-  CAN.sendMsgBuf(0x104, 0, 8, canSendBuffer2);
+	CAN.sendMsgBuf(0x104, 0, 8, canSendBuffer2);
 
-  while(CAN_MSGAVAIL == CAN.checkReceive())
-  {
-      uint8_t canMsgLength = 0;
-      uint8_t canMsgData[8];
+	while(CAN_MSGAVAIL == CAN.checkReceive())
+	{
+    	uint8_t canMsgLength = 0;
+    	uint8_t canMsgData[8];
 
-      CAN.readMsgBuf(&canMsgLength, canMsgData);
-      instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
-      instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
-  } 
-  
+    	CAN.readMsgBuf(&canMsgLength, canMsgData);
+    	instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
+    	instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
+	}
+
 	SPI.endTransaction();
 }
 
@@ -202,18 +203,20 @@ void calculateVoltage(void)
 	filteredVoltage_mV = filteredVoltage_mV - (filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE)) + voltage_mV;
 	filteredVoltage_mV = filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE);
 }
-/*
-//calculates the temperature recorded by the thermistor
+
+
 void calculateTemperature(void)
 {
-	uint16_t temp_degC = analogRead(TEMP_SENS)* math required to make work;
+	float rThermistor_ohms = (float) 5.0*5000.0/(analogRead(TEMP_SENS)*5.0/1023.0);
+  float lnOperand = rThermistor_ohms/(10000*pow(2.71828, (-THERMISTOR_B_CONSTANT/298.0)));
+  float temp_degCx2 = 2.0 * (THERMISTOR_B_CONSTANT / log(lnOperand) - 273 + THERMISTOR_CALIB_DEGC);
+  //Serial.println((uint32_t) temp_degCx2);
 
 	filteredTemp_degCx2 *= ADC_FILTER_SIZE;
-	filteredTemp_degCx2 = filteredTemp_degCx2 - (filteredTemp_degCx2 >> filterShiftSize(ADC_FILTER_SIZE)) + temp_degC;
-	filteredTemp_degCx2 = filteredTemp_degCx2 >> filterShiftSize(ADC_FILTER_SIZE);
+	filteredTemp_degCx2 = (uint16_t) ((float) ((filteredTemp_degCx2 - (filteredTemp_degCx2/ADC_FILTER_SIZE) + temp_degCx2)/ADC_FILTER_SIZE));
 }
 
-*/
+
 uint8_t filterShiftSize(uint8_t filterSize)
 {
 	uint8_t shiftSize = 0;
@@ -274,8 +277,6 @@ void executePid(void)
 	//calculate error
 
 	float controllerPositionError_percent = instThrottleRequest_percent - zeroedHallPosition_percent;
- 
-	Serial.println((int8_t) controllerPositionError_percent);
 /*
 	if(instThrottleRequest_percent < 1.0)
 	{
@@ -326,23 +327,6 @@ void executePid(void)
 		controllerResult = CONTROLLER_EFFORT_MIN;
 	}
 
-	/*
-	uint8_t canSendBuffer[8];
-
-	canSendBuffer[0] = ((int16_t) (100.0 * controllerPTerm)) & 0b11111111;
-	canSendBuffer[1] = ((int16_t) (100.0 * controllerPTerm)) >> 8;
-	canSendBuffer[2] = ((int16_t) (100.0 * controllerITerm)) & 0b11111111;
-	canSendBuffer[3] = ((int16_t) (100.0 * controllerITerm)) >> 8;
-	canSendBuffer[4] = ((int16_t) (1000.0 * controllerDTerm)) & 0b11111111;
-	canSendBuffer[5] = ((int16_t) (1000.0 * controllerDTerm)) >> 8;
-	canSendBuffer[6] = ((int16_t) (1000.0 * controllerResult)) & 0b11111111;
-	canSendBuffer[7] = ((int16_t) (1000.0 * controllerResult)) >> 8;
-
-	SPI.beginTransaction(SPI_SETTINGS_CAN);
-	CAN.sendMsgBuf(CAN_DIAG_MSG_ADDRESS,0,8,canSendBuffer);
-	SPI.endTransaction();
- */
-
 	// Take action on the pin ports
 	if(controllerResult > 0)
 	{
@@ -353,15 +337,8 @@ void executePid(void)
 	else if(controllerResult <= 0)
 	{
 		analogWrite(MOTOR_OPEN_PIN, 0);
-		//controllerResult = controllerResult * 255;
-		//Timer1.pwm(MOTOR_CLOSE_PIN, controllerResult);
+		// use spring to close
 	}
-}
-
-//calculates the filtered (moving avg) throttle input value
-void filterThrottle(void)
-{
-
 }
 
 
@@ -408,54 +385,12 @@ void setup()
 
 void loop()
 {
-  /*
-  if(millis() - previousCanReceiveMillis >= 50)
-  {
-    SPI.beginTransaction(SPI_SETTINGS_CAN);
-	  if(CAN_MSGAVAIL == CAN.checkReceive())
-	  {
-        uint8_t canMsgLength = 0;
-        uint8_t canMsgData[8];
-
-        CAN.readMsgBuf(&canMsgLength, canMsgData);
-        instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
-        instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
-    } 
-    SPI.endTransaction();
-  }
-  */
-
-		//canIntRecv = 0;
-		//getCanMsg();
-/*
-  if(millis() - pidTuningMillis1 >= 5000)
-  {
-    pidTuningMillis1 = millis();
-    if(pidTuningState == 0)
-    {
-      pidTuningState = 1;
-    }
-    else
-    {
-      pidTuningState = 0;
-    }
-  }
-
-  if(pidTuningState == 1)
-  {
-    instThrottleRequest_percent = 30.0;
-  }
-  else
-  {
-    instThrottleRequest_percent = 0.0;
-  }
-  */
-
 	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
 	{
 		previousPidMillis = millis();
 		getZeroedHallPosition();
-		executePid(); 
+		//executePid();
+    Serial.println(zeroedHallPosition_percentx10);
 	}
 
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
@@ -463,7 +398,7 @@ void loop()
 		previousCanMillis = millis();
 		calculateCurrent();
 		calculateVoltage();
-		//calculateTemperature();
+		calculateTemperature();
 		sendCanMsg();
 	}
 }

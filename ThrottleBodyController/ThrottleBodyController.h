@@ -30,7 +30,7 @@ July 2016
 #define SPI_HALL_CS 10
 #define CURRENT_SENS 1
 #define VOLTAGE_SENS 0
-#define TEMP_SENS 7
+#define TEMP_SENS 2
 #define MOTOR_OPEN_PIN 5
 #define MOTOR_CLOSE_PIN 4
 
@@ -39,14 +39,13 @@ July 2016
 #define HALL_FILTER_SIZE 1			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
 #define HALL_ZERO_READING_COUNT 8
 
-#define PID_EXECUTION_INTERVAL 10	//number of ms between changes in PID controller
+#define PID_EXECUTION_INTERVAL 100	//number of ms between changes in PID controller
 #define CAN_SEND_INTERVAL 50
 
 #define HALL_GET_ANGLE 0x3FFF
 #define HALL_ZERO_ANGLE_HIGH 0x0016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
-
 
 #define CAN_DIAG_MSG_ADDRESS 0x103
 #define CAN_THROTTLE_MSG_ADDRESS 0x102
@@ -72,6 +71,7 @@ SPISettings SPI_SETTINGS_CAN(16000000, MSBFIRST, SPI_MODE0);
 #define CONTROLLER_EFFORT_MAX 1
 #define CONTROLLER_EFFORT_MIN 0
 
-
+#define THERMISTOR_B_CONSTANT 3400
+#define THERMISTOR_CALIB_DEGC 3
 
 #endif // THROTTLEBODYCONTROLLER_H
