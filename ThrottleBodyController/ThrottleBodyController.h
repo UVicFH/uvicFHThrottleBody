@@ -35,12 +35,12 @@ July 2016
 #define MOTOR_CLOSE_PIN 4
 
 #define ADC_FILTER_SIZE 1
-#define HALL_AVERAGE_SIZE 8			//number of readings to take into account over 1ms. Makes reading more accurate.
+#define HALL_AVERAGE_SIZE 4			//number of readings to take into account over 1ms. Makes reading more accurate.
 #define HALL_ZERO_READING_COUNT 1
 
-#define PID_EXECUTION_INTERVAL 5	//number of ms between changes in PID controller
+#define PID_EXECUTION_INTERVAL 3	//number of ms between changes in PID controller
 #define CAN_SEND_INTERVAL 5
-#define VALIDITY_CHECK_INTERVAL 100
+#define VALIDITY_CHECK_INTERVAL 1000
 
 #define HALL_GET_ANGLE 0x3FFF
 #define HALL_GET_ERROR 0x0001
@@ -55,8 +55,8 @@ July 2016
 #define SPI_HALL_SELECT() PORTB &= ~(0b00000100)				//digitalWrite(SPI_HALL_CS, LOW)
 #define SPI_HALL_DESELECT() PORTB |= (0b00000100) 			//digitalWrite(SPI_HALL_CS, HIGH)
 
-SPISettings SPI_SETTINGS_HALL(16000000, MSBFIRST, SPI_MODE1);
-SPISettings SPI_SETTINGS_CAN(16000000, MSBFIRST, SPI_MODE0);
+SPISettings SPI_SETTINGS_HALL = SPISettings(8000000, MSBFIRST, SPI_MODE1);
+SPISettings SPI_SETTINGS_CAN = SPISettings(8000000, MSBFIRST, SPI_MODE0);
 
 #define CONTROLLER_KP 0.04		//2 * (pi/2)/100
 #define CONTROLLER_KI 0.08		// 1.5 * (pi/2)/100
