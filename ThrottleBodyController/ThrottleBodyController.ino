@@ -13,6 +13,7 @@ July 2016
 uint8_t canIntRecv = 0;
 uint32_t previousPidMillis = 0;
 uint32_t previousCanMillis = 0;
+uint32_t previousValidityMillis = 0;
 uint32_t pidTuningMillis1 = 0;
 uint8_t pidTuningState = 0;
 
@@ -43,8 +44,44 @@ float controllerResult = 0;
 
 MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
 
+uint16_t as5048aReadAndClearError(void)
+{
+	uint16_t spiSendCommand = HALL_GET_ERROR;
+	uint16_t hallErrorMsg = 0b1111111111111111;
+
+	spiSendCommand |= 0b0100000000000000;           //OR operator sets the read/write bit to READ
+	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
+
+	SPI.beginTransaction(SPI_SETTINGS_HALL);
+
+	digitalWrite(SPI_HALL_CS, LOW);
+	SPI.transfer16(spiSendCommand);					// returned value is garbage angle from last request
+	digitalWrite(SPI_HALL_CS, HIGH);
+
+	spiSendCommand = HALL_GET_ANGLE;				// reset spi command to read angle (in preparation for next request)
+	spiSendCommand |= 0b0100000000000000;           //OR operator sets the read/write bit to READ
+	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
+
+	digitalWrite(SPI_HALL_CS, LOW);
+	hallErrorMsg = SPI.transfer16(spiSendCommand);	// returned value is error message from last request
+	digitalWrite(SPI_HALL_CS, HIGH);
+
+	SPI.endTransaction();
+	return hallErrorMsg;
+}
+
+void as5048aCheckError(uint16_t command) {
+	if ((command & 0b0100000000000000) == 0b0100000000000000) 
+	{
+		Serial.print("Hall Sensor Error: ");
+		Serial.println(as5048aReadAndClearError(), BIN);
+	}
+	return;	
+}
+
 uint16_t as5048aRemoveParity(uint16_t command)
 {
+	as5048aCheckError(command);
 	return (command &= 0b0011111111111111);                 //clears parity and error bit
 }
 
@@ -65,63 +102,62 @@ uint8_t as5048aSetParity(uint16_t value){
 }
 
 
-uint16_t as5048aReadCommand(uint16_t spiSendCommand)
+void as5048aReadAndAverage(uint16_t spiSendCommand)
 {
-	uint16_t hallPosition_nominal = 0;
+	uint32_t hallPositionSum_nominal = 0;
 
 	spiSendCommand |= 0b0100000000000000;           //OR operator sets the read/write bit to READ
 	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
 
+	
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
+	//SPI.transfer(spiSendCommand);
+	//SPI.transfer(0);
+	//delayMicroseconds(250);
 
-	digitalWrite(SPI_HALL_CS, LOW);
-	hallPosition_nominal = SPI.transfer16(spiSendCommand);
-	digitalWrite(SPI_HALL_CS,HIGH);
+	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
+	{
+		// //SPI.transfer16(spiSendCommand);
+		// digitalWrite(SPI_HALL_CS, HIGH);
+		// SPI.transfer16(0x00);
+
+		digitalWrite(SPI_HALL_CS, LOW);
+		hallPositionSum_nominal += (uint32_t) (16384 - as5048aRemoveParity(SPI.transfer16(spiSendCommand)));
+		digitalWrite(SPI_HALL_CS, HIGH);
+		delayMicroseconds(250);
+		//SPI.transfer(0);
+	}	
 
 	SPI.endTransaction();
 
-	hallPosition_nominal = as5048aRemoveParity(hallPosition_nominal);
-
-	return hallPosition_nominal;
-}
-
-
-uint16_t getAbsoluteHallPosition(void)
-{
-	uint16_t hallPositionSum_nominal = 0;
-	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
-	{
-		hallPositionSum_nominal += as5048aReadCommand(HALL_GET_ANGLE);
-	}
-	absoluteHallPosition_nominal = hallPositionSum_nominal >> filterShiftSize(HALL_AVERAGE_SIZE);
-  absoluteHallPosition_nominal = 16383 - absoluteHallPosition_nominal;
-	return absoluteHallPosition_nominal;
+	absoluteHallPosition_nominal = (uint16_t) (hallPositionSum_nominal >> filterShiftSize(HALL_AVERAGE_SIZE));
+    //absoluteHallPosition_nominal = 16383 - absoluteHallPosition_nominal;							//reverse direction sensor works on
 }
 
 void getZeroedHallPosition(void)
 {
-	getAbsoluteHallPosition();
-	zeroedHallPosition_nominal = (int32_t) absoluteHallPosition_nominal - hallZeroPosition_nominal;
+	as5048aReadAndAverage(HALL_GET_ANGLE);
+	zeroedHallPosition_nominal =  (int32_t) absoluteHallPosition_nominal - (int32_t) hallZeroPosition_nominal;
 	if(zeroedHallPosition_nominal < 0)
 	{
 		zeroedHallPosition_nominal = 0;
 	}
-	zeroedHallPosition_percent = (float) zeroedHallPosition_nominal*360.0/16384.0*100.0/69.2;
-	zeroedHallPosition_percentx10 = (uint16_t) ((float)zeroedHallPosition_percent*10.0);
+
+	zeroedHallPosition_percentx10 = (((uint32_t) zeroedHallPosition_nominal)*10) >> 5; //same as dividing by 32, or doing the complex float math we had here.
+	Serial.println(zeroedHallPosition_percentx10);
+	// zeroedHallPosition_percent = (float) zeroedHallPosition_nominal*360.0/16384.0*100.0/69.2;
+	// zeroedHallPosition_percentx10 = (uint16_t) ((float)zeroedHallPosition_percent*10.0);
+	// Serial.println(zeroedHallPosition_percentx10);
 }
 
 
 void findHallZeroPosition(void)
 {
 	uint32_t hallZeroPositionSum_nominal = 0;
-	getAbsoluteHallPosition();
 
-	for(int i = 0; i<HALL_ZERO_READING_COUNT; i++)
-	{
-		hallZeroPositionSum_nominal += getAbsoluteHallPosition();
-		delay(50);
-	}
-	hallZeroPosition_nominal = hallZeroPositionSum_nominal >> filterShiftSize(HALL_ZERO_READING_COUNT);
+	as5048aReadAndAverage(HALL_GET_ANGLE);
+	hallZeroPosition_nominal = absoluteHallPosition_nominal;
+	
 	Serial.print("hallZeroPosition_nominal = ");
 	Serial.println(hallZeroPosition_nominal);
 }
@@ -158,6 +194,7 @@ void sendCanMsg(void)
 	canSendBuffer1[4] = filteredVoltage_mV & 0b11111111;
 	canSendBuffer1[5] = filteredVoltage_mV >> 8;
 	canSendBuffer1[6] = filteredTemp_degCx2;
+	canSendBuffer1[7] = 0;
 
 	canSendBuffer2[0] = (int8_t) instThrottleRequest_percent;
 	canSendBuffer2[1] = ((int8_t) (100.0 * controllerResult)) & 0b01111111;
@@ -165,21 +202,22 @@ void sendCanMsg(void)
 	canSendBuffer2[3] = 0;
 	canSendBuffer2[4] = 0;
 	canSendBuffer2[5] = 0;
-	canSendBuffer2[6] = 0;  
+	canSendBuffer2[6] = 0; 
+	canSendBuffer2[7] = 0; 
 	
 	SPI.beginTransaction(SPI_SETTINGS_CAN);
 	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer1);
 	CAN.sendMsgBuf(0x104, 0, 8, canSendBuffer2);
 
-	while(CAN_MSGAVAIL == CAN.checkReceive())
-	{
-    	uint8_t canMsgLength = 0;
-    	uint8_t canMsgData[8];
+	// while(CAN_MSGAVAIL == CAN.checkReceive())
+	// {
+ //    	uint8_t canMsgLength = 0;
+ //    	uint8_t canMsgData[8];
 
-    	CAN.readMsgBuf(&canMsgLength, canMsgData);
-    	instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
-    	instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
-	}
+ //    	CAN.readMsgBuf(&canMsgLength, canMsgData);
+ //    	instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
+ //    	instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
+	// }
 
 	SPI.endTransaction();
 }
@@ -246,6 +284,10 @@ uint8_t filterShiftSize(uint8_t filterSize)
 		case 128:
 			shiftSize = 7;
 			break;
+		default:
+			shiftSize=0;
+			break;
+
 	}
 	return shiftSize;	
 }
@@ -346,11 +388,11 @@ void setup()
 {
 
 	Serial.begin(115200);
-  SPI.begin();
+    SPI.begin();
 	Timer1.initialize(1000);  // 1000 us = 1000 Hz
 
 	//output = 1, input = 0
-	DDRB |= 0b00000110; //PB1 and PB2 are outputs
+	DDRB |= 0b00001110; //PB1 and PB2 are outputs
 	DDRC |= 0b00000000; //no outputs on PC
 	DDRD |= 0b00110000; //PD4 PD5 are outputs    output = 1  
 	while(1)
@@ -390,16 +432,25 @@ void loop()
 		previousPidMillis = millis();
 		getZeroedHallPosition();
 		//executePid();
-    Serial.println(zeroedHallPosition_percentx10);
+
 	}
+
+	// if(millis() - previousValidityMillis >= VALIDITY_CHECK_INTERVAL)	
+	// {
+	// 	previousValidityMillis = millis();
+	// 	getZeroedHallPosition();
+	// }
+
 
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
 	{
 		previousCanMillis = millis();
-		calculateCurrent();
-		calculateVoltage();
-		calculateTemperature();
+		// calculateCurrent();
+		// calculateVoltage();
+		// calculateTemperature();
+		//delayMicroseconds(250);
 		sendCanMsg();
+		delayMicroseconds(250);
 	}
 }
 

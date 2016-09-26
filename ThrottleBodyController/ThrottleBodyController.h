@@ -35,14 +35,15 @@ July 2016
 #define MOTOR_CLOSE_PIN 4
 
 #define ADC_FILTER_SIZE 1
-#define HALL_AVERAGE_SIZE 1			//number of readings to take into account over 1ms. Makes reading more accurate.
-#define HALL_FILTER_SIZE 1			//number of these averaged elements to take into account for reporting position over CAN. Might not be necessary.
-#define HALL_ZERO_READING_COUNT 8
+#define HALL_AVERAGE_SIZE 8			//number of readings to take into account over 1ms. Makes reading more accurate.
+#define HALL_ZERO_READING_COUNT 1
 
-#define PID_EXECUTION_INTERVAL 100	//number of ms between changes in PID controller
-#define CAN_SEND_INTERVAL 50
+#define PID_EXECUTION_INTERVAL 5	//number of ms between changes in PID controller
+#define CAN_SEND_INTERVAL 5
+#define VALIDITY_CHECK_INTERVAL 100
 
 #define HALL_GET_ANGLE 0x3FFF
+#define HALL_GET_ERROR 0x0001
 #define HALL_ZERO_ANGLE_HIGH 0x0016
 #define HALL_ZERO_ANGLE_LOW 0x0017
 #define HALL_NOP_COMMAND 0
