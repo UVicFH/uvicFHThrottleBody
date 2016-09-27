@@ -36,7 +36,7 @@ void setup() {
 }
 
 void loop() {
-   if(millis() - previousMillis_ms > 50)
+   if(millis() - previousMillis_ms > 10)
    {
      previousMillis_ms = millis();
      
@@ -63,11 +63,18 @@ void loop() {
 
      Serial.println(throttleRequest_percentx10);
 
-     uint8_t canSendBuffer[8];
+     uint8_t canSendBuffer[3];
      canSendBuffer[0] = throttleRequest_percentx10 & 0b11111111;
      canSendBuffer[1] = throttleRequest_percentx10 >> 8;
      canSendBuffer[2] = buttonBlip;
    
-     CAN.sendMsgBuf(0x102, 0, 8, canSendBuffer);   // send position over CAN
+     CAN.sendMsgBuf(0x102, 0, 3, canSendBuffer);   // send position over CAN
+
+     canSendBuffer[0] = 0;
+     canSendBuffer[1] = 0;
+     canSendBuffer[2] = 0;
+
+     CAN.sendMsgBuf(0x103, 0, 3, canSendBuffer);
+     CAN.sendMsgBuf(0x106, 0, 3, canSendBuffer);
    }
 }

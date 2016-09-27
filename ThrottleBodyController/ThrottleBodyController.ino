@@ -7,7 +7,6 @@ July 2016
 #include <SPI.h>
 #include <mcp_can.h>
 #include "ThrottleBodyController.h"
-#include <TimerOne.h>
 #include <math.h>
 
 uint8_t canIntRecv = 0;
@@ -43,6 +42,18 @@ float controllerResult = 0;
 
 
 MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
+
+uint32_t adjustedMillis(void)
+{
+	return millis()>>6;
+}
+
+uint32_t adjustedMicros(void)
+{
+	return micros()>>6;
+}
+
+
 
 uint16_t as5048aReadAndClearError(void)
 {
@@ -117,15 +128,10 @@ void as5048aReadAndAverage(uint16_t spiSendCommand)
 
 	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
 	{
-		// //SPI.transfer16(spiSendCommand);
-		// digitalWrite(SPI_HALL_CS, HIGH);
-		// SPI.transfer16(0x00);
-
 		digitalWrite(SPI_HALL_CS, LOW);
 		hallPositionSum_nominal += (uint32_t) (16384 - as5048aRemoveParity(SPI.transfer16(spiSendCommand)));
 		digitalWrite(SPI_HALL_CS, HIGH);
 		delayMicroseconds(250);
-		//SPI.transfer(0);
 	}	
 
 	SPI.endTransaction();
@@ -143,9 +149,9 @@ void getZeroedHallPosition(void)
 		zeroedHallPosition_nominal = 0;
 	}
 
-	zeroedHallPosition_percentx10 = (((uint32_t) zeroedHallPosition_nominal)*10) >> 5; //same as dividing by 32, or doing the complex float math we had here.
-	Serial.println(zeroedHallPosition_percentx10);
-	// zeroedHallPosition_percent = (float) zeroedHallPosition_nominal*360.0/16384.0*100.0/69.2;
+	zeroedHallPosition_percentx10 = (((uint32_t) zeroedHallPosition_nominal)*10) >> 5; //same as dividing by 32, or doing zeroedHallPosition_nominal*360.0/16384.0*100.0/69.2.
+	//Serial.println(zeroedHallPosition_percentx10);
+	// zeroedHallPosition_percent = (float) ;
 	// zeroedHallPosition_percentx10 = (uint16_t) ((float)zeroedHallPosition_percent*10.0);
 	// Serial.println(zeroedHallPosition_percentx10);
 }
@@ -292,21 +298,6 @@ uint8_t filterShiftSize(uint8_t filterSize)
 	return shiftSize;	
 }
 
-
-
-//calculates the position of the motor shaft from the quad encoder
-void calculateQuadPosition(void)
-{
-	// use polling, and direct port manipulation. poll every millis.
-	// if we're only polling every 1ms, and we're sitting on the edge of a signal, we might miss some of the transitions
-	// if we require a state to be constant for 6-8ms before accepting it, that could help deal with bounces. 
-	// if the state changes before 6-8ms we reset that timer and keep monitoring.
-	// classic debounce of the signal.
-
-
-
-}
-
 //error check the two positions
 void validatePositions(void)
 {
@@ -372,7 +363,7 @@ void executePid(void)
 	// Take action on the pin ports
 	if(controllerResult > 0)
 	{
-		Timer1.pwm(MOTOR_CLOSE_PIN, 0);
+		//Timer1.pwm(MOTOR_CLOSE_PIN, 0);
 		controllerResult = controllerResult * 255;
 		analogWrite(MOTOR_OPEN_PIN, controllerResult);
 	}
@@ -386,15 +377,18 @@ void executePid(void)
 
 void setup()
 {
+	TCCR0B = TCCR0B & 0b11111000 | 0x01;
+	TCCR1B = TCCR1B & 0b11111000 | 0x01;
+	//TCCR2B = TCCR2B & 0b11111000 | 0x01;
 
 	Serial.begin(115200);
     SPI.begin();
-	Timer1.initialize(1000);  // 1000 us = 1000 Hz
 
 	//output = 1, input = 0
 	DDRB |= 0b00001110; //PB1 and PB2 are outputs
 	DDRC |= 0b00000000; //no outputs on PC
-	DDRD |= 0b00110000; //PD4 PD5 are outputs    output = 1  
+	DDRD |= 0b01110000; //PD4 PD5 are outputs    output = 1  NORMALLY for board R1, PD6 should be input. but here it's output.
+
 	while(1)
 	{
 		if(CAN_OK == CAN.begin(CAN_500KBPS))
@@ -409,21 +403,19 @@ void setup()
 		}
 	}
 
-  Timer1.pwm(MOTOR_CLOSE_PIN, 0);
-  analogWrite(MOTOR_OPEN_PIN, 0);
+	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
+	CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
+	CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
+	CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
 
-	//CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
-	//CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
-	//CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
-	//CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
+	//attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt								
 
-	//attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt
-
-	delay(500);
+	delay(250);
 	findHallZeroPosition();
+	analogWrite(6,150);
 }
 
-
+// wiring.c modified according to http://playground.arduino.cc/Main/TimerPWMCheatsheet
 
 void loop()
 {
@@ -432,15 +424,13 @@ void loop()
 		previousPidMillis = millis();
 		getZeroedHallPosition();
 		//executePid();
-
 	}
 
-	// if(millis() - previousValidityMillis >= VALIDITY_CHECK_INTERVAL)	
-	// {
-	// 	previousValidityMillis = millis();
-	// 	getZeroedHallPosition();
-	// }
-
+	if(millis() - previousValidityMillis >= VALIDITY_CHECK_INTERVAL)	
+	{
+		previousValidityMillis = millis();
+		getZeroedHallPosition();
+	}
 
 	if(millis() - previousCanMillis >= CAN_SEND_INTERVAL)
 	{
@@ -448,8 +438,14 @@ void loop()
 		// calculateCurrent();
 		// calculateVoltage();
 		// calculateTemperature();
-		//delayMicroseconds(250);
 		sendCanMsg();
+		if(CAN_MSGAVAIL == CAN.checkReceive())
+		{
+      		uint8_t buf[8];
+      		uint8_t len =0;
+      		CAN.readMsgBuf(&len, buf);
+      		instThrottleRequest_percent = (buf[0] | (buf[1])<<8)/10.0;
+      	}
 		delayMicroseconds(250);
 	}
 }
