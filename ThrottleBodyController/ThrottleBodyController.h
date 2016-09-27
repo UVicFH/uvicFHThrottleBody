@@ -35,7 +35,6 @@ July 2016
 #define MOTOR_OPEN_PIN 5
 #define MOTOR_CLOSE_PIN 4
 
-#define ADC_FILTER_SIZE 1
 #define HALL_AVERAGE_SIZE 8			//number of readings to take into account over 1ms. Makes reading more accurate.
 #define HALL_ZERO_READING_COUNT 1
 
@@ -73,7 +72,7 @@ SPISettings SPI_SETTINGS_CAN(8000000, MSBFIRST, SPI_MODE0);
 #define CONTROLLER_EFFORT_MAX 1
 #define CONTROLLER_EFFORT_MIN 0
 
-#define THERMISTOR_B_CONSTANT 3400
-#define THERMISTOR_CALIB_DEGC 3
+#define THERMISTOR_B_CONSTANT 3400.0
+#define THERMISTOR_CALIB_DEGC 3.0
 
 #endif // THROTTLEBODYCONTROLLER_H
