@@ -1,7 +1,12 @@
 /*
 This is the firmware for the UVic Formula Hybrid custom throttle body.
 Ted Alley
-July 2016
+September 2016
+
+VERY IMPORTANT!!!!!!!!!!!!
+wiring.c modified according to http://playground.arduino.cc/Main/TimerPWMCheatsheet. PRESCALE_FACTOR = 1
+wiring.c file within folder C:\Program Files (x86)\Arduino\hardware\arduino\avr\cores\arduino
+
 */
 
 #include <SPI.h>
@@ -23,9 +28,9 @@ uint8_t instThrottleBlip_deg = 0;
 uint8_t instThrottleBlip_ms = 0;
 
 //values to be sent over CAN
-uint16_t filteredCurrentDraw_mA = 0;									
-uint16_t filteredVoltage_mV = 0;										
-uint8_t filteredTemp_degCx2 = 0;							
+uint16_t currentDraw_mA = 0;									
+uint16_t voltage_mV = 0;										
+uint8_t temp_degCx2 = 0;							
 uint16_t zeroedHallPosition_percentx10 = 0;							
 
 //sensor feedback not sent over CAN
@@ -41,20 +46,9 @@ float controllerPositionErrorPrev_percent = 0;
 float controllerResult = 0;											
 
 
-MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin
+MCP_CAN CAN(SPI_CAN_CS);                      //set CS CAN pin. used for CAN library operation.
 
-uint32_t adjustedMillis(void)
-{
-	return millis()>>6;
-}
-
-uint32_t adjustedMicros(void)
-{
-	return micros()>>6;
-}
-
-
-
+//requests the error register and returns the value. second request is angle request so we can go back into normal operation.
 uint16_t as5048aReadAndClearError(void)
 {
 	uint16_t spiSendCommand = HALL_GET_ERROR;
@@ -81,6 +75,7 @@ uint16_t as5048aReadAndClearError(void)
 	return hallErrorMsg;
 }
 
+//prints the value of the error register
 void as5048aCheckError(uint16_t command) {
 	if ((command & 0b0100000000000000) == 0b0100000000000000) 
 	{
@@ -90,6 +85,7 @@ void as5048aCheckError(uint16_t command) {
 	return;	
 }
 
+//removes the first two bits of any received message, checks for error bit
 uint16_t as5048aRemoveParity(uint16_t command)
 {
 	as5048aCheckError(command);
@@ -97,6 +93,7 @@ uint16_t as5048aRemoveParity(uint16_t command)
 }
 
 
+//returns the parity bit to create even parity in a 16 bit message
 uint8_t as5048aSetParity(uint16_t value){
 	uint8_t cnt = 0;
 	uint8_t i;
@@ -112,7 +109,7 @@ uint8_t as5048aSetParity(uint16_t value){
 	return cnt & 0x1;
 }
 
-
+//sends the request to the hall sensor to read the position. calculates the read value from the sensor.
 void as5048aReadAndAverage(uint16_t spiSendCommand)
 {
 	uint32_t hallPositionSum_nominal = 0;
@@ -120,12 +117,7 @@ void as5048aReadAndAverage(uint16_t spiSendCommand)
 	spiSendCommand |= 0b0100000000000000;           //OR operator sets the read/write bit to READ
 	spiSendCommand |= ((uint16_t)as5048aSetParity(spiSendCommand)<<15);
 
-	
 	SPI.beginTransaction(SPI_SETTINGS_HALL);
-	//SPI.transfer(spiSendCommand);
-	//SPI.transfer(0);
-	//delayMicroseconds(250);
-
 	for(int i=0; i<HALL_AVERAGE_SIZE; i++)
 	{
 		digitalWrite(SPI_HALL_CS, LOW);
@@ -133,13 +125,12 @@ void as5048aReadAndAverage(uint16_t spiSendCommand)
 		digitalWrite(SPI_HALL_CS, HIGH);
 		delayMicroseconds(250);
 	}	
-
 	SPI.endTransaction();
 
 	absoluteHallPosition_nominal = (uint16_t) (hallPositionSum_nominal >> filterShiftSize(HALL_AVERAGE_SIZE));
-    //absoluteHallPosition_nominal = 16383 - absoluteHallPosition_nominal;							//reverse direction sensor works on
 }
 
+//used to subtract the read value from the pre-established zero point. Note integer types used for safe execution
 void getZeroedHallPosition(void)
 {
 	as5048aReadAndAverage(HALL_GET_ANGLE);
@@ -148,15 +139,11 @@ void getZeroedHallPosition(void)
 	{
 		zeroedHallPosition_nominal = 0;
 	}
-
 	zeroedHallPosition_percentx10 = (((uint32_t) zeroedHallPosition_nominal)*10) >> 5; //same as dividing by 32, or doing zeroedHallPosition_nominal*360.0/16384.0*100.0/69.2.
-	//Serial.println(zeroedHallPosition_percentx10);
-	// zeroedHallPosition_percent = (float) ;
-	// zeroedHallPosition_percentx10 = (uint16_t) ((float)zeroedHallPosition_percent*10.0);
-	// Serial.println(zeroedHallPosition_percentx10);
 }
 
 
+//used at the beginning of program execution to find the zero point of the sensor.
 void findHallZeroPosition(void)
 {
 	uint32_t hallZeroPositionSum_nominal = 0;
@@ -166,24 +153,6 @@ void findHallZeroPosition(void)
 	
 	Serial.print("hallZeroPosition_nominal = ");
 	Serial.println(hallZeroPosition_nominal);
-}
-
-
-//gets the CAN message in the buffer, and reads the required values
-void getCanMsg(void)
-{
-	uint8_t canMsgLength = 0;
-	uint8_t canMsgData[8];
-
-	while (CAN_MSGAVAIL == CAN.checkReceive()) 
-	{
-		// read data,  len: data length, buf: data buf
-		CAN.readMsgBuf(&canMsgLength, canMsgData);
-		instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
-		//instThrottleBlip_ms = canMsgData[2];
-		//instThrottleBlip_deg = canMsgData[3];
-		instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
-	}
 }
 
 
@@ -214,53 +183,44 @@ void sendCanMsg(void)
 	SPI.beginTransaction(SPI_SETTINGS_CAN);
 	CAN.sendMsgBuf(CAN_FEEDBACK_MSG_ADDRESS,0,8,canSendBuffer1);
 	CAN.sendMsgBuf(0x104, 0, 8, canSendBuffer2);
-
-	// while(CAN_MSGAVAIL == CAN.checkReceive())
-	// {
- //    	uint8_t canMsgLength = 0;
- //    	uint8_t canMsgData[8];
-
- //    	CAN.readMsgBuf(&canMsgLength, canMsgData);
- //    	instThrottleRequest_percentx10 = ((canMsgData[1]<<8) | canMsgData[0]);
- //    	instThrottleRequest_percent = (float) instThrottleRequest_percentx10 / 10.0;
-	// }
-
 	SPI.endTransaction();
 }
 
+//gets the CAN message in the buffer, and reads the required values
+void receiveCanMsg(void)
+{
+	while(CAN_MSGAVAIL == CAN.checkReceive())		//this used to be an 'if', try changing back if code does not work.
+	{
+  		uint8_t buf[8];
+  		uint8_t len =0;
+  		CAN.readMsgBuf(&len, buf);
+  		instThrottleRequest_percentx10 = (buf[0] | (buf[1])<<8);
+  		instThrottleRequest_percent = ((float) instThrottleRequest_percentx10) / 10.0;
+  	}
+}
 
-//calculates the current consumption of the device. oversample and average.
+
+//calculates the current consumption of the device. only reports current value; no averaging.
 void calculateCurrent(void)
 {
-	float currentDraw_mA = analogRead(CURRENT_SENS)/1023.0*5/(0.5)*1000; //0.5 in denom = 0.01*0.05*1000
-
-	filteredCurrentDraw_mA *= ADC_FILTER_SIZE;
-	filteredCurrentDraw_mA = (uint16_t) ((float) ((filteredCurrentDraw_mA - (filteredCurrentDraw_mA/ADC_FILTER_SIZE) + currentDraw_mA)/ADC_FILTER_SIZE));
+	currentDraw_mA = (uint16_t) (analogRead(CURRENT_SENS) * 10)  // analogRead(CURRENT_SENS)/1023.0*5/(0.01*0.05*1000)*1000
 }
 
-//calculates the voltage input to the device, accounting for voltage drop due to current through the FET and shunt
+//calculates the voltage input to the device, accounts for voltage drop through shunt
 void calculateVoltage(void)
 {
-	uint16_t voltage_mV = (uint16_t) (analogRead(VOLTAGE_SENS)/1023.0*5000*13.3/3.3);
-
-	filteredVoltage_mV *= ADC_FILTER_SIZE;
-	filteredVoltage_mV = filteredVoltage_mV - (filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE)) + voltage_mV;
-	filteredVoltage_mV = filteredVoltage_mV >> filterShiftSize(ADC_FILTER_SIZE);
+	uint16_t voltage_mV = (uint16_t) (analogRead(VOLTAGE_SENS) * 20 + (float)(0.05 * currentDraw_mA)); //analogRead(VOLTAGE_SENS)/1023.0*5000*13.3/3.3
 }
 
-
+//calculates temperature according to thermistor calibrated curve
 void calculateTemperature(void)
 {
 	float rThermistor_ohms = (float) 5.0*5000.0/(analogRead(TEMP_SENS)*5.0/1023.0);
-  float lnOperand = rThermistor_ohms/(10000*pow(2.71828, (-THERMISTOR_B_CONSTANT/298.0)));
-  float temp_degCx2 = 2.0 * (THERMISTOR_B_CONSTANT / log(lnOperand) - 273 + THERMISTOR_CALIB_DEGC);
-  //Serial.println((uint32_t) temp_degCx2);
-
-	filteredTemp_degCx2 *= ADC_FILTER_SIZE;
-	filteredTemp_degCx2 = (uint16_t) ((float) ((filteredTemp_degCx2 - (filteredTemp_degCx2/ADC_FILTER_SIZE) + temp_degCx2)/ADC_FILTER_SIZE));
+    float lnOperand = rThermistor_ohms/(10000*pow(2.71828, (-THERMISTOR_B_CONSTANT/298.0)));
+    temp_degCx2 = (uint8_t) (2.0 * (THERMISTOR_B_CONSTANT / log(lnOperand) - 273.0 + THERMISTOR_CALIB_DEGC));
 }
 
-
+//calculates the number of bit shifts required to perform a given division
 uint8_t filterShiftSize(uint8_t filterSize)
 {
 	uint8_t shiftSize = 0;
@@ -298,7 +258,7 @@ uint8_t filterShiftSize(uint8_t filterSize)
 	return shiftSize;	
 }
 
-//error check the two positions
+//error check the two positions. still to be done.
 void validatePositions(void)
 {
 
@@ -363,7 +323,6 @@ void executePid(void)
 	// Take action on the pin ports
 	if(controllerResult > 0)
 	{
-		//Timer1.pwm(MOTOR_CLOSE_PIN, 0);
 		controllerResult = controllerResult * 255;
 		analogWrite(MOTOR_OPEN_PIN, controllerResult);
 	}
@@ -374,21 +333,22 @@ void executePid(void)
 	}
 }
 
-
+//run once at the beginning of execution
 void setup()
 {
-	TCCR0B = TCCR0B & 0b11111000 | 0x01;
-	TCCR1B = TCCR1B & 0b11111000 | 0x01;
-	//TCCR2B = TCCR2B & 0b11111000 | 0x01;
+	TCCR0B = TCCR0B & 0b11111000 | 0x01;		//modify the prescale factor of timer0 so pins 5 and 6 have faster pwm (62.5kHz)
+	TCCR1B = TCCR1B & 0b11111000 | 0x01;		//modify the prescale factor of timer1 so pins 9 and 10 have faster pwm (31.4kHz)
 
 	Serial.begin(115200);
     SPI.begin();
 
+	//Setting input and output pins. This was suitable for ETB Controller PCB R1, but will need to be adjusted for ETB Controller PCB R2.
 	//output = 1, input = 0
 	DDRB |= 0b00001110; //PB1 and PB2 are outputs
 	DDRC |= 0b00000000; //no outputs on PC
-	DDRD |= 0b01110000; //PD4 PD5 are outputs    output = 1  NORMALLY for board R1, PD6 should be input. but here it's output.
+	DDRD |= 0b00110000; //PD4 PD5 are outputs
 
+	//Enable CAN communications
 	while(1)
 	{
 		if(CAN_OK == CAN.begin(CAN_500KBPS))
@@ -403,20 +363,21 @@ void setup()
 		}
 	}
 
+	//Set can masks and filters to only accept the throttle request message (this is critical so that the SPI bus doesn't get bogged down
+	// with traffic due to the MCP2515 receiving other messages on the bus)
 	CAN.init_Mask(0, 0, 0xFFF);												//must set both masks; use standard CAN frame
 	CAN.init_Mask(1, 0, 0xFFF);												//must set both masks; use standard CAN frame
 	CAN.init_Filt(0, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 0 for receive buffer 0
-	CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1
+	CAN.init_Filt(2, 0, CAN_THROTTLE_MSG_ADDRESS);							//filter 1 for receive buffer 1								
 
-	//attachInterrupt(0, MCP2515_ISR, FALLING); // start interrupt								
+	
+	delay(250);		//delay after setting filters and masks before getting the zero position of the hall sensor.
 
-	delay(250);
 	findHallZeroPosition();
-	analogWrite(6,150);
 }
 
-// wiring.c modified according to http://playground.arduino.cc/Main/TimerPWMCheatsheet
 
+//run continuously during execution
 void loop()
 {
 	if(millis() - previousPidMillis >= PID_EXECUTION_INTERVAL)
@@ -426,7 +387,7 @@ void loop()
 		//executePid();
 	}
 
-	if(millis() - previousValidityMillis >= VALIDITY_CHECK_INTERVAL)	
+	if(millis() - previousValidityMillis >= VALIDITY_CHECK_INTERVAL)	//doesn't actually get value from second sensor. simply polls first sensor again to simulate more spi traffic.
 	{
 		previousValidityMillis = millis();
 		getZeroedHallPosition();
@@ -439,18 +400,7 @@ void loop()
 		// calculateVoltage();
 		// calculateTemperature();
 		sendCanMsg();
-		if(CAN_MSGAVAIL == CAN.checkReceive())
-		{
-      		uint8_t buf[8];
-      		uint8_t len =0;
-      		CAN.readMsgBuf(&len, buf);
-      		instThrottleRequest_percent = (buf[0] | (buf[1])<<8)/10.0;
-      	}
+		receiveCanMsg();
 		delayMicroseconds(250);
 	}
-}
-
-void MCP2515_ISR()
-{
-	canIntRecv = 1;
 }
