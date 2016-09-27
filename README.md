@@ -7,7 +7,9 @@ C:\Program Files (x86)\Arduino\hardware\arduino\avr\cores\adruino
 
 You must change the following line:
 '#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))'
+
 to:
+
 '#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1 * 256))'
 
 If you do not make this change, millis(), micros(), delay(), and delayMicroseconds() will not work.
