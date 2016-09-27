@@ -6,11 +6,12 @@ This file is found in:
 C:\Program Files (x86)\Arduino\hardware\arduino\avr\cores\adruino
 
 You must change the following line:
-'#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))'
+
+'''#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))'''
 
 to:
 
-'#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1 * 256))'
+'''#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(1 * 256))'''
 
 If you do not make this change, millis(), micros(), delay(), and delayMicroseconds() will not work.
 These are critical to the function of the program.
